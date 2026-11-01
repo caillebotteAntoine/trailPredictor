@@ -1,0 +1,28 @@
+
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+
+# Test and coverage artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+
+
+# Type checking and linters
+.mypy_cache/
+.pyre/
+.pytype/
+.ruff_cache/
+
+# IDEs and editors
+.vscode/
+.github/
+
+# Saved html and csv or data files
+*.html
+*.csv
+data/
