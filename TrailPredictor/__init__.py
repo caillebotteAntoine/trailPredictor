@@ -1,0 +1,2 @@
+from TrailPredictor.activities import RunningActivities
+from TrailPredictor.minetti import cost_of_running, cost_of_walking
