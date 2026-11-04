@@ -1,6 +1,7 @@
 """Chrono and speed utility functions translated from source/chrono.R"""
 
 from __future__ import annotations
+from typing import Literal
 
 import math
 from typing import Union
@@ -17,23 +18,52 @@ class UnsupportedOperationError(TypeError):
         super().__init__(message)
 
 
+SpeedUnit = Literal[
+    "m_per_s",
+    "log(m_per_s)",
+    "km_per_h",
+    "log(km_per_h)",
+    "mph",
+    "log(mph)",
+    "min_per_km",
+    "log(min_per_km)",
+]
+SPEED_UNITS: tuple[SpeedUnit, ...] = (
+    "m_per_s",
+    "log(m_per_s)",
+    "km_per_h",
+    "log(km_per_h)",
+    "mph",
+    "log(mph)",
+    "min_per_km",
+    "log(min_per_km)",
+)
+
+
 class Speed(float):
     """A class representing speed, with support for various units and conversions.
     The speed is stored internally in meters per second (m/s)."""
 
     # Conversion factors to meters per second (m/s)
-    _TO_M_PER_S = {
+    _TO_M_PER_S: dict[SpeedUnit, float] = {
         "m_per_s": 1.0,
         "km_per_h": 1.0 / 3.6,
         "mph": 0.44704,
+        "log(m_per_s)": 1.0,
+        "log(km_per_h)": 1.0 / 3.6,
+        "log(mph)": 0.44704,
     }
     __array_priority__ = (
         1000  # Ensure Speed takes precedence in operations with numpy arrays
     )
 
     def __new__(
-        cls, value=float("nan"), unit: str = "m_per_s", nan_as_zero: bool = False
+        cls, value=float("nan"), unit: SpeedUnit = "m_per_s", nan_as_zero: bool = False
     ):
+        if unit == "min_per_km":
+            return cls.from_pace(value)
+        if unit == "log(min_per_km)":
+            return cls.from_pace(math.exp(value))
         try:
             factor = cls._TO_M_PER_S[unit]
         except KeyError:
@@ -44,9 +74,10 @@ class Speed(float):
         if value is None or pd.isna(value):
             value = 0.0 if nan_as_zero else float("nan")
 
+        if unit.startswith("log(") and unit.endswith(")"):
+            value = math.exp(float(value))
+
         ms = float(value) * factor
-        if ms < 0:
-            raise ValueError(f"negative speed not supported : {value} {unit}")
         return super().__new__(cls, ms)
 
     # ---------- alternative constructors ----------
@@ -55,14 +86,16 @@ class Speed(float):
         """Construct a speed from a pace in minutes per kilometer."""
         if minutes_per_km is None or pd.isna(minutes_per_km):
             return cls(float("nan"))
-        if minutes_per_km <= 0:
-            raise ValueError("pace must be positive")
+        # if minutes_per_km <= 0:
+        #     raise ValueError("pace must be positive")
         return cls(1000.0 / (60.0 * minutes_per_km))
 
     # ---------- conversions ----------
-    def to(self, unit: str = "m_per_s") -> float:
+    def to(self, unit: SpeedUnit = "m_per_s") -> float:
         """Convert the speed to the specified unit."""
         try:
+            if unit.startswith("log(") and unit.endswith(")"):
+                return math.log(float(self) / self._TO_M_PER_S[unit])
             return float(self) / self._TO_M_PER_S[unit]
         except KeyError:
             raise ValueError(

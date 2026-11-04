@@ -5,6 +5,7 @@ from sklearn.model_selection import train_test_split
 from TrailPredictor.activities import RunningActivities
 from TrailPredictor.load_fit import ProgressCallback
 from TrailPredictor.loading import load_activities
+from TrailPredictor.minetti import cost_of_walking, cost_of_running
 
 WINDOWS_KM = (1, 3, 5, 10)
 
@@ -39,14 +40,16 @@ def export_activities(
         file_name = row["file_name"]
 
         if not file_name.endswith(".fit.gz") and not file_name.endswith(".fit"):
-            print(f"⏩Skipping {file_name} because it is not a FIT file")
+            print(
+                f"⏩Skipping {file_name} ({row['name']}) because it is not a FIT file"
+            )
             continue
 
-        running_activities.append(
-            RunningActivities.from_computed_file(
-                file_name, segment_width, progress_cb=progress_cb
-            )
+        run = RunningActivities.from_computed_file(
+            file_name, segment_width, progress_cb=progress_cb
         )
+        run._data["name"] = row["name"]
+        running_activities.append(run)
 
     return running_activities
 
@@ -151,6 +154,11 @@ def build_features(
             x[f"{feature}_front_{k}"] = _window_sum(
                 x_grp[feature], k, direction="front"
             )
+
+    # => Minetti energy cost for running and walking
+    x["slope"] = x["altitude_drop"] / x["distance"]
+    x["walking_cost"] = cost_of_walking(x["slope"]) / cost_of_walking(0)
+    x["running_cost"] = cost_of_running(x["slope"]) / cost_of_running(0)
 
     # TODO : ravito
 

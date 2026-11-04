@@ -1,34 +1,36 @@
 from pathlib import Path
 from warnings import warn
 
-import numpy as np
 import pandas as pd
 
+from TrailPredictor.utils import DATA_DIR, COMPUTED_DIR
 from TrailPredictor.chrono import Speed
 from TrailPredictor.load_fit import ProgressCallback, load_fit_file
-
-DATA_DIR = Path(__file__).parent.parent / "data"
 
 
 def _get_computed_file_path(file_path: str, segment_width: int) -> Path:
     """Get the path to the computed file for a given FIT file and segment width."""
     path = DATA_DIR / file_path
     file_name = path.with_name(path.with_name(path.stem).stem).name
-    computed_path = (
-        DATA_DIR / "computed" / path.parent.name / f"{file_name}_{segment_width}.csv"
-    )
+    computed_path = COMPUTED_DIR / path.parent.name / f"{file_name}_{segment_width}.csv"
     return computed_path
 
 
 class RunningActivities:
-    def __init__(self, data: pd.DataFrame):
+    def __init__(self, data: pd.DataFrame, prediction: pd.Series | None = None):
         self._data = data
         self._segment_width = data["distance"].diff().max()
+        self._prediction = prediction
 
     @property
     def data(self) -> pd.DataFrame:
         """Return a copy of the underlying data."""
         return self._data.copy()
+
+    @property
+    def prediction(self) -> pd.Series | None:
+        """Return a copy of the prediction series."""
+        return self._prediction.copy() if self._prediction is not None else None
 
     @property
     def plot(self):
@@ -160,7 +162,7 @@ class RunningActivities:
         path = _get_computed_file_path(file_path, segment_width=segment_width)
         if not path.exists():
             print(
-                f"💾Computed file not found:\n\t{path},\n\t⌛trying to load from original file..."
+                f"\t💾Computed file not found:\n\t{path},\n\t⌛trying to load from original file..."
             )
             return cls.from_fit_file(
                 file_path, segment_width=segment_width, progress_cb=progress_cb

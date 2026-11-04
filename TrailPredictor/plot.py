@@ -9,8 +9,9 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from TrailPredictor.activities import RunningActivities
-from TrailPredictor.dataest import Dataset, Target, TARGETS
-from tests.test_chrono import Speed
+from TrailPredictor.chrono import Speed
+from TrailPredictor.dataset import Dataset, Target, TARGETS
+from TrailPredictor.minetti import cost_of_running, cost_of_walking
 
 DropCategory = Literal["Uphill", "Downhill", "Flat"]
 CATEGORY_COLORS = {"Uphill": "#0072B2", "Downhill": "#D55E00", "Flat": "#777777"}
@@ -93,15 +94,22 @@ class PlotDataset(Dataset):
         )
         current_target = self._target
         figs = {}
-        for col in TARGETS:
-            self.change_target(col)
-            figs[col] = plot_fct(**kwargs)
-        self.change_target(current_target)
+        try:
+            for col in TARGETS:
+                self.change_target(col)
+                figs[col] = plot_fct(**kwargs)
+        finally:
+            self.change_target(current_target)
 
         for i, fig in enumerate(figs.values(), start=1):
             row = (i - 1) // 2 + 1
             col = (i - 1) % 2 + 1
+            x_title = fig.layout.xaxis.title.text
+            y_title = fig.layout.yaxis.title.text
+            merged.update_xaxes(title_text=x_title, row=row, col=col)
+            merged.update_yaxes(title_text=y_title, row=row, col=col)
             for trace in fig.data:
+                trace.showlegend = i == 1
                 merged.add_trace(trace, row=row, col=col)
 
         _base_layout(merged, title=title)
@@ -136,10 +144,15 @@ class PlotDataset(Dataset):
         """Display a scatter plot of the target variable vs altitude drop."""
         if features not in self._data.columns:
             raise ValueError(f"Invalid feature: {features}")
+        values = self._data[features]
+        if not pd.api.types.is_numeric_dtype(values):
+            raise ValueError(f"Feature '{features}' must be numeric")
+        if values.dropna().empty:
+            raise ValueError(f"Feature '{features}' contains no numeric values")
         fig = _base_layout(go.Figure(), f"{self._target} vs {features} per segment")
         fig.add_trace(
             go.Scatter(
-                x=self._data[features],
+                x=values,
                 y=self.target,
                 mode="markers",
                 marker={"color": TARGETS_COLORS[self._target], "size": 5},
@@ -155,7 +168,9 @@ class PlotActivities(RunningActivities):
     def __init__(
         self, running_activities: RunningActivities, drop_threshold: float = 2.0
     ):
-        super().__init__(running_activities.data)
+        super().__init__(
+            running_activities.data, prediction=running_activities._prediction
+        )
         self._data = self._data[
             [
                 "timestamp",
@@ -262,6 +277,9 @@ class PlotActivities(RunningActivities):
         fig.update_yaxes(title="Altitude (m)")
         return fig
 
+    # =================================================================================== #
+    #                                   GPS TRACK PLOT
+    # =================================================================================== #
     def track_map(
         self,
         color_by: Literal["altitude", "heart_rate", "pace"] = "altitude",
@@ -368,6 +386,9 @@ class PlotActivities(RunningActivities):
         )
         return float(np.clip(11 - np.log2(max(span, 1e-5) / 0.05), 3, 15))
 
+    # ================================================================================= #
+    #                                   PACE PLOT
+    # ================================================================================= #
     def pace_by_segment(self) -> go.Figure:
         """Display segment pace with bars sized by covered distance."""
         data = self._data.copy()
@@ -423,15 +444,12 @@ class PlotActivities(RunningActivities):
         )
         return fig
 
+    # =================================================================================== #
+    #                                   HEART RATE PLOT
+    # =================================================================================== #
     def hr_overlay(self, x_axis: Literal["distance", "time"] = "distance") -> go.Figure:
         """Overlay heart rate and altitude on two y axes."""
-        if (
-            "heart_rate" not in self._data
-            or self._data["heart_rate"].notna().sum() == 0
-        ):
-            raise ValueError(
-                "L'activité ne contient pas de fréquence cardiaque valide."
-            )
+
         if x_axis not in ("distance", "time"):
             raise ValueError("x_axis must be 'distance' or 'time'")
         data = self._data.copy()
@@ -447,24 +465,23 @@ class PlotActivities(RunningActivities):
         fig.add_trace(
             go.Scatter(
                 x=x,
-                y=data["heart_rate"],
-                mode="lines",
-                name="Fréquence cardiaque",
-                line={"color": "#CC79A7"},
-                hovertemplate="FC : %{y:.0f} bpm<extra></extra>",
-            ),
-            secondary_y=False,
-        )
-        altitude = data["altitude"]
-        fig.add_trace(
-            go.Scatter(
-                x=x,
-                y=altitude,
+                y=data["altitude"],
                 mode="lines",
                 fill="tozeroy",
                 name="Altitude",
                 line={"color": "#56B4E9"},
                 hovertemplate="Altitude : %{y:.1f} m<extra></extra>",
+            ),
+            secondary_y=False,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=data["heart_rate"],
+                mode="lines",
+                name="Fréquence cardiaque",
+                line={"color": "#CC79A7"},
+                hovertemplate="FC : %{y:.0f} bpm<extra></extra>",
             ),
             secondary_y=True,
         )
@@ -475,15 +492,85 @@ class PlotActivities(RunningActivities):
         fig.update_yaxes(title="Altitude (m)", secondary_y=True)
         return fig
 
+    # ================================================================================== #
+    #                                   SPEED PLOT
+    # ================================================================================== #
+    def speed(self) -> go.Figure:
+        """Overlay speed (true and predicted is available) and altitude on two y axes."""
+
+        data = self._data.copy()
+        x = self.distance_km
+        fig = _base_layout(
+            make_subplots(specs=[[{"secondary_y": True}]]),
+            "Vitesse et altitude",
+        )
+
+        customdata = data[["pace"]]
+
+        hovertemplate = (
+            "Distance : %{x:.2f} km<br>"
+            "Altitude : %{y:.1f} m<br>"
+            "Speed : %{customdata:.1f} km/h<extra></extra>"
+        )
+        if self.prediction is not None:
+            customdata["prediction"] = self.prediction
+            customdata["error"] = np.abs(self.prediction - data["pace"])
+            hovertemplate = hovertemplate.replace(
+                "Speed : %{customdata:.1f} km/h<extra></extra>",
+                "Speed : %{customdata[0]:.1f} km/h"
+                "<br>Prediction : %{customdata[1]:.1f} km/h"
+                "<br>Erreur : %{customdata[2]:.1f} km/h<extra></extra>",
+            )
+
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=data["altitude"],
+                mode="lines",
+                fill="tozeroy",
+                name="Altitude",
+                line={"color": "#56B4E9"},
+                customdata=customdata,
+                hovertemplate=hovertemplate,
+            ),
+            secondary_y=False,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=data["pace"],
+                mode="lines",
+                name="Speed",
+                line={"color": "#44AF52"},
+                customdata=customdata,
+                hovertemplate=hovertemplate,
+            ),
+            secondary_y=True,
+        )
+        if self.prediction is not None:
+            fig.add_trace(
+                go.Scatter(
+                    x=x,
+                    y=self.prediction,
+                    mode="lines",
+                    name="Speed predicted",
+                    line={"color": "#8256E9"},
+                    customdata=customdata,
+                    hovertemplate=hovertemplate,
+                ),
+                secondary_y=True,
+            )
+
+        fig.update_xaxes(title="Distance (km)")
+        fig.update_yaxes(title="Speed (m/s)", secondary_y=False)
+        fig.update_yaxes(title="Altitude (m)", secondary_y=True)
+        return fig
+
+    # ================================================================================== #
+    #                                   TIME IN HEART RATE ZONES PLOT
+    # ================================================================================== #
     def time_in_hr_zones(self) -> go.Figure:
         """Display time spent in heart-rate zones."""
-        if (
-            "heart_rate" not in self._data
-            or self._data["heart_rate"].notna().sum() == 0
-        ):
-            raise ValueError(
-                "L'activité ne contient pas de fréquence cardiaque valide."
-            )
 
         durations = {
             zone: self._data.loc[self._data["heart_rate_zone"].eq(zone), "elapsed_time"]
@@ -512,3 +599,32 @@ class PlotActivities(RunningActivities):
         )
         fig.update_xaxes(title="Temps (minutes)")
         return fig
+
+
+
+def plot_minetti_curve() -> go.Figure:
+    """Plot Minetti energy costs relative to flat terrain."""
+    slopes = np.linspace(-0.35, 0.35, 100)
+    walking_cost = cost_of_walking(slopes)
+    running_cost = cost_of_running(slopes)
+
+    fig = _base_layout(go.Figure(), "Minetti model")
+    fig.add_trace(
+        go.Scatter(
+            x=slopes,
+            y=walking_cost / cost_of_walking(0),
+            mode="lines",
+            name="Cost_walk",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=slopes,
+            y=running_cost / cost_of_running(0),
+            mode="lines",
+            name="Cost_running",
+        )
+    )
+    fig.update_xaxes(title="Slope")
+    fig.update_yaxes(title="Energy cost relative to flat terrain")
+    return fig

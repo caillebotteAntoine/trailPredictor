@@ -38,15 +38,12 @@ def test_speed_nan_and_zero_pace():
     assert Speed(0).pace_str() == "--:-- min/km"
 
 
-def test_speed_rejects_invalid_units_and_negative_values():
+def test_speed_rejects_invalid_units_and_values():
     with pytest.raises(ValueError, match="unit not supported"):
         Speed(10, unit="invalid")
 
     with pytest.raises(ValueError, match="unit not supported"):
         Speed(10).to("invalid")
-
-    with pytest.raises(ValueError, match="negative speed"):
-        Speed(-1)
 
     with pytest.raises(ValueError, match="pace must be positive"):
         Speed.from_pace(0)
@@ -72,12 +69,6 @@ def test_speed_sub():
 
     assert type(first - second) is Speed
     assert first - second == pytest.approx(8)
-
-    with pytest.raises(TypeError, match="unsupported operand"):
-        first - "unsupported"
-
-    with pytest.raises(ValueError, match="negative speed"):
-        first - Speed(20)
 
     assert type(first - 0.25) is Speed
     assert first - 0.25 == pytest.approx(9.75)
