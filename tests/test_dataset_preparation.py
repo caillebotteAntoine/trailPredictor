@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from TrailPredictor.dataset_preparation import build_features
+from TrailPredictor.features import build_features
 
 # --------------------------------------------------------------------------- #
 # Valeurs attendues (calculées à la main), par activité

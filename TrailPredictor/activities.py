@@ -4,8 +4,8 @@ from warnings import warn
 import pandas as pd
 
 from TrailPredictor.utils import DATA_DIR, COMPUTED_DIR
-from TrailPredictor.chrono import Speed
 from TrailPredictor.load_fit import ProgressCallback, load_fit_file
+from TrailPredictor.speed_columns import add_speed_columns
 
 
 def _get_computed_file_path(file_path: str, segment_width: int) -> Path:
@@ -62,11 +62,11 @@ class RunningActivities:
                 columns={"enhanced_altitude": "altitude"}
             )
 
-        if (x["enhanced_speed"] == x["speed"]).all():
-            x.drop(columns=["enhanced_speed"], inplace=True)
-        else:
-            warn("enhanced_speed is not equal to speed, using enhanced_speed")
-            x = x.drop(columns=["speed"]).rename(columns={"enhanced_speed": "speed"})
+        # if (x["enhanced_speed"] == x["speed"]).all():
+        #     x.drop(columns=["enhanced_speed"], inplace=True)
+        # else:
+        #     warn("enhanced_speed is not equal to speed, using enhanced_speed")
+        #     x = x.drop(columns=["speed"]).rename(columns={"enhanced_speed": "speed"})
 
         # aggregate by segments of segment_width meters
         last_timestamp = x["timestamp"].max()
@@ -81,7 +81,6 @@ class RunningActivities:
                         (x.max() // segment_width + 1) * segment_width
                     ),
                     # mean of the features for each segment
-                    "speed": "mean",
                     "heart_rate": "mean",
                     "altitude": "mean",
                     "position_lat": "mean",
@@ -106,11 +105,10 @@ class RunningActivities:
         ).total_seconds()
         x["elapsed_time"] = pd.to_timedelta(x["elapsed_time"], unit="s")
 
-        x.insert(
-            2,
-            "pace",
-            Speed.as_speed(segment_width / x["elapsed_time"].dt.total_seconds()),
+        x["speed"] = (segment_width / x["elapsed_time"].dt.total_seconds()).astype(
+            "float64"
         )
+        x = add_speed_columns(x, from_col="speed", unit="speed")
 
         return cls(x)
 
@@ -186,7 +184,16 @@ class RunningActivities:
         # convert columns to appropriate types
         x["timestamp"] = pd.to_datetime(x["timestamp"])
         x["elapsed_time"] = pd.to_timedelta(x["elapsed_time"])
-        x["pace"] = Speed.as_speed(segment_width / x["elapsed_time"].dt.total_seconds())
+        if "speed" in x.columns:
+            x = add_speed_columns(x, from_col="speed", unit="speed")
+        else:
+            parts = (
+                x["pace"]
+                .astype("string")
+                .str.extract(r"^\s*(\d+):(\d+(?:\.\d+)?)", expand=True)
+            )
+            pace = parts[0].astype("float64") + parts[1].astype("float64") / 60.0
+            x = add_speed_columns(x.assign(pace=pace), from_col="pace", unit="pace")
         activity = cls(x)
 
         if progress_cb:

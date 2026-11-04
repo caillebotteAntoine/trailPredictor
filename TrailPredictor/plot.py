@@ -9,9 +9,9 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from TrailPredictor.activities import RunningActivities
-from TrailPredictor.chrono import Speed
 from TrailPredictor.dataset import Dataset, Target, TARGETS
 from TrailPredictor.minetti import cost_of_running, cost_of_walking
+from TrailPredictor.speed_columns import format_pace
 
 DropCategory = Literal["Uphill", "Downhill", "Flat"]
 CATEGORY_COLORS = {"Uphill": "#0072B2", "Downhill": "#D55E00", "Flat": "#777777"}
@@ -44,10 +44,7 @@ def _rgba(hex_color: str, alpha: float) -> str:
 
 
 def _pace_text(pace: float) -> str:
-    if not np.isfinite(pace):
-        return "—"
-    minutes, seconds = divmod(int(round(pace * 60)), 60)
-    return f"{minutes}:{seconds:02d}/km"
+    return format_pace(pace).replace(" min/km", "/km").replace("--:--/km", "—")
 
 
 def _pace_ticks(values: pd.Series) -> tuple[list[float], list[str]]:
@@ -179,6 +176,7 @@ class PlotActivities(RunningActivities):
                 "position_long",
                 "distance",
                 "altitude",
+                "speed",
                 "pace",
                 "heart_rate",
             ]
@@ -393,9 +391,9 @@ class PlotActivities(RunningActivities):
         """Display segment pace with bars sized by covered distance."""
         data = self._data.copy()
         distance = data["distance"]
-        pace = pd.to_numeric(pd.Series([p.as_pace() for p in self._data["pace"]]))
+        pace = pd.to_numeric(self._data["pace"], errors="coerce")
         # set to NA the pace bigger than 20 min/km
-        pace[pace > Speed.from_pace(20).as_pace()] = np.nan
+        pace[pace > 20] = np.nan
         average = pace.mean()
 
         # durations = data["elapsed_time"].dt.total_seconds()
@@ -505,21 +503,22 @@ class PlotActivities(RunningActivities):
             "Vitesse et altitude",
         )
 
-        customdata = data[["pace"]]
+        customdata = data[["speed"]].copy()
 
         hovertemplate = (
             "Distance : %{x:.2f} km<br>"
             "Altitude : %{y:.1f} m<br>"
-            "Speed : %{customdata:.1f} km/h<extra></extra>"
+            "Speed : %{customdata[0]:.1f} m/s<extra></extra>"
         )
         if self.prediction is not None:
             customdata["prediction"] = self.prediction
-            customdata["error"] = np.abs(self.prediction - data["pace"])
-            hovertemplate = hovertemplate.replace(
-                "Speed : %{customdata:.1f} km/h<extra></extra>",
-                "Speed : %{customdata[0]:.1f} km/h"
-                "<br>Prediction : %{customdata[1]:.1f} km/h"
-                "<br>Erreur : %{customdata[2]:.1f} km/h<extra></extra>",
+            customdata["error"] = np.abs(self.prediction - data["speed"])
+            hovertemplate = (
+                "Distance : %{x:.2f} km<br>"
+                "Altitude : %{y:.1f} m<br>"
+                "Speed : %{customdata[0]:.1f} m/s"
+                "<br>Prediction : %{customdata[1]:.1f} m/s"
+                "<br>Erreur : %{customdata[2]:.1f} m/s<extra></extra>"
             )
 
         fig.add_trace(
@@ -538,7 +537,7 @@ class PlotActivities(RunningActivities):
         fig.add_trace(
             go.Scatter(
                 x=x,
-                y=data["pace"],
+                y=data["speed"],
                 mode="lines",
                 name="Speed",
                 line={"color": "#44AF52"},
@@ -562,8 +561,8 @@ class PlotActivities(RunningActivities):
             )
 
         fig.update_xaxes(title="Distance (km)")
-        fig.update_yaxes(title="Speed (m/s)", secondary_y=False)
-        fig.update_yaxes(title="Altitude (m)", secondary_y=True)
+        fig.update_yaxes(title="Altitude (m)", secondary_y=False)
+        fig.update_yaxes(title="Speed (m/s)", secondary_y=True)
         return fig
 
     # ================================================================================== #
