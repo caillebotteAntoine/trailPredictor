@@ -77,8 +77,7 @@ def export_activities(
         run = RunningActivities.from_computed_file(
             file_name, segment_width, progress_cb=progress_cb
         )
-        run._data["name"] = row["name"]
-        running_activities.append(run)
+        running_activities.append(RunningActivities(run.data.assign(name=row["name"])))
 
     return running_activities
 
