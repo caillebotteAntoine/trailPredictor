@@ -33,6 +33,8 @@ from pathlib import Path
 import fitdecode
 import pandas as pd
 
+from TrailPredictor.load_fit import message_fields
+
 SEMICIRCLE_TO_DEG = 180.0 / 2**31
 
 pd.set_option("display.width", 200)
@@ -77,13 +79,9 @@ def load_messages(
         for frame in fit:
             if not isinstance(frame, fitdecode.FitDataMessage):
                 continue
-            row = {}
-            for f in frame.fields:
-                if f.value is None:
-                    continue
-                row[f.name] = f.value
-                if f.units:
-                    units[frame.name][f.name] = f.units
+            row, field_units = message_fields(frame)
+            if field_units:
+                units[frame.name].update(field_units)
             messages[frame.name].append(row)
     return dict(messages), dict(units)
 
@@ -146,7 +144,7 @@ def profile_fields(df: pd.DataFrame, units: dict[str, str]) -> pd.DataFrame:
 # --------------------------------------------------------------------------- #
 # Diagnostics de la série temporelle
 # --------------------------------------------------------------------------- #
-def diagnose_records(rec: pd.DataFrame) -> None:
+def diagnose_records(rec: pd.DataFrame) -> None:  # pylint: disable=too-many-locals
     """Print diagnostics on the ``record`` time series.
 
     Parameters
@@ -266,7 +264,8 @@ def diagnose_records(rec: pd.DataFrame) -> None:
     if "heart_rate" in cols:
         hr = rec["heart_rate"].dropna()
         print(
-            f"  FC                 : moy {hr.mean():.0f} | min {hr.min():.0f} | max {hr.max():.0f} bpm"
+            f"  FC                 : moy {hr.mean():.0f} | min {hr.min():.0f}"
+            f" | max {hr.max():.0f} bpm"
         )
 
     # --- Champs non standards (potentiellement propriétaires ou développeur)
@@ -313,7 +312,7 @@ def _print_single_message(name: str, rows: list[dict], units: dict[str, str]) ->
             print(f"  {k:<32} {_short(v, 60)}{u}")
 
 
-def inspect_fit(
+def inspect_fit(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     path: str | Path, max_laps: int = 40, export_csv: str | Path | None = None
 ) -> dict:
     """Print a full report of a FIT file and return its content.
