@@ -1,3 +1,5 @@
+"""Tests for :func:`TrailPredictor.features.build_features`."""
+
 import numpy as np
 import pandas as pd
 import pytest

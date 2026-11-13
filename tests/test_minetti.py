@@ -1,3 +1,5 @@
+"""Tests for :mod:`TrailPredictor.minetti`."""
+
 import numpy as np
 import pytest
 
