@@ -4,7 +4,10 @@ from typing import cast
 
 import numpy as np
 import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler
 
+from TrailPredictor.activities import RunningActivities
 from TrailPredictor.utils import COMPUTED_DIR
 from TrailPredictor.features import create_dataset, split_test_train
 from TrailPredictor.features import build_features
@@ -92,7 +95,7 @@ class Dataset:
         # scaling when the dataset is split).
         self._data = dataset.copy()
         self._segment_width = infer_segment_width(self._data)
-        self._data = self._prepare_raw(self._data, self._segment_width)
+        self._data = self._prepare_raw(self._data)
         self._data = build_features(self._data)
 
         missing = {
@@ -150,9 +153,6 @@ class Dataset:
         Put it in a ``Pipeline`` so that the mean and standard deviation are
         computed on the training set only.
         """
-        from sklearn.compose import ColumnTransformer
-        from sklearn.preprocessing import StandardScaler
-
         to_scale = [col for col in self._features if not col.endswith("_ratio")]
 
         return ColumnTransformer(
@@ -390,7 +390,10 @@ class Dataset:
         PlotDataset
             Plotting interface built from a copy of the dataset.
         """
-        from TrailPredictor.plot import PlotDataset
+        # Lazy import: TrailPredictor.plot subclasses Dataset (circular import).
+        from TrailPredictor.plot import (  # pylint: disable=import-outside-toplevel
+            PlotDataset,
+        )
 
         return PlotDataset(self)
 
@@ -412,8 +415,6 @@ class Dataset:
         ValueError
             If no segment has this `activity_id`.
         """
-        from TrailPredictor.activities import RunningActivities
-
         activity_data = cast(
             pd.DataFrame,
             self._data.loc[self._data["activity_id"] == activity_id],
@@ -448,7 +449,7 @@ class Dataset:
         )
 
     @staticmethod
-    def _prepare_raw(raw: pd.DataFrame, segment_width: int) -> pd.DataFrame:
+    def _prepare_raw(raw: pd.DataFrame) -> pd.DataFrame:
         """Convert the time columns and add the speed / pace columns.
 
         The same treatment is applied whether the raw data comes from the
@@ -519,7 +520,7 @@ class Dataset:
             )
             raw.to_csv(raw_path, index=False)
 
-        raw = cls._prepare_raw(raw, segment_width)
+        raw = cls._prepare_raw(raw)
         dataset = build_features(raw)
 
         missing = {
