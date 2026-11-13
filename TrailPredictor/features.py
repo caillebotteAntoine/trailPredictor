@@ -66,18 +66,19 @@ def export_activities(
         else:
             print(f"{row['distance_km']:.2f} km - {row['name']}")
 
-        file_name = row["file_name"]
+        file_path = row["file_name"]
 
-        if not file_name.endswith(".fit.gz") and not file_name.endswith(".fit"):
+        if not file_path.endswith(".fit.gz") and not file_path.endswith(".fit"):
             print(
-                f"⏩Skipping {file_name} ({row['name']}) because it is not a FIT file"
+                f"⏩Skipping {file_path} ({row['name']}) because it is not a FIT file"
             )
             continue
 
         run = RunningActivities.from_computed_file(
-            file_name, segment_width, progress_cb=progress_cb
+            file_path, segment_width, progress_cb=progress_cb
         )
-        running_activities.append(RunningActivities(run.data.assign(name=row["name"])))
+        run.name = row["name"]
+        running_activities.append(run)
 
     return running_activities
 
@@ -261,7 +262,7 @@ def build_features(
     x["walking_cost"] = cost_of_walking(x["slope"]) / cost_of_walking(0)
     x["running_cost"] = cost_of_running(x["slope"]) / cost_of_running(0)
 
-    # TODO : ravito
+    # x["pause"] = x["speed"] < 1.0  # speed < 1 m/s is considered a pause
 
     # removing done because it is redundant with distance
     x.drop(columns="distance_done", inplace=True)

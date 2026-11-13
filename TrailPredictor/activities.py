@@ -5,9 +5,9 @@ from warnings import warn
 
 import pandas as pd
 
-from TrailPredictor.utils import DATA_DIR, COMPUTED_DIR
 from TrailPredictor.load_fit import ProgressCallback, load_fit_file
 from TrailPredictor.speed_columns import add_speed_columns
+from TrailPredictor.utils import COMPUTED_DIR, DATA_DIR
 
 
 def _get_computed_file_path(file_path: str, segment_width: int) -> Path:
@@ -42,6 +42,9 @@ class RunningActivities:
 
     def __init__(self, data: pd.DataFrame, prediction: pd.Series | None = None):
         self._data = data
+        self._data["name"] = self._data.get("name", pd.NA)
+        self._name = self._data["name"].iloc[0]
+
         self._segment_width = data["distance"].diff().max()
 
         self._prediction = prediction
@@ -51,6 +54,24 @@ class RunningActivities:
                 raise ValueError("Prediction series must have a name.")
             # remove suffix _pred
             self._target_name = str(prediction.name).removesuffix("_pred")
+
+    @property
+    def name(self) -> str:
+        """Name of the activity, if any."""
+        return self._name if self._name is not None else ""
+
+    @name.setter
+    def name(self, value: str):
+        """Set the name of the activity.
+
+        Parameters
+        ----------
+        value : str
+            The new name for the activity.
+        """
+        assert isinstance(value, str), "Activity name must be a string."
+        self._data["name"] = value
+        self._name = value
 
     @property
     def target_name(self) -> str:
@@ -167,6 +188,13 @@ class RunningActivities:
             if col not in x.columns:
                 x[col] = pd.NA
 
+        # point-wise elevation changes, summed per segment below; the first diff of
+        # a segment is measured from the last point of the previous one, so no
+        # elevation change is lost at segment boundaries
+        altitude_change = x["altitude"].diff().fillna(0.0)
+        x["drop_pos"] = altitude_change.clip(lower=0)
+        x["drop_neg"] = altitude_change.clip(upper=0)
+
         # aggregate by segments of segment_width meters
         last_timestamp = x["timestamp"].max()
         x["segment"] = (x["distance"] // segment_width).astype(int)
@@ -184,8 +212,9 @@ class RunningActivities:
                     "altitude": "mean",
                     "position_lat": "mean",
                     "position_long": "mean",
-                    "drop_pos": lambda x: x[x > 0].sum(),
-                    "drop_neg": lambda x: x[x < 0].sum(),
+                    # total positive / negative elevation change of the segment
+                    "drop_pos": "sum",
+                    "drop_neg": "sum",
                 }
             )
             .reset_index(drop=False)

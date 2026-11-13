@@ -26,11 +26,11 @@ HEART_RATE_ZONES = {
 }
 
 
-def _base_layout(fig: go.Figure, title: str) -> go.Figure:
+def _base_layout(fig: go.Figure, title: str, subtitle: str = "") -> go.Figure:
     fig.update_layout(
         template="plotly_white",
-        title=title,
-        margin={"l": 50, "r": 25, "t": 55, "b": 45},
+        title={"text": title, "subtitle": {"text": subtitle}},
+        margin={"l": 50, "r": 25, "t": 75 if subtitle else 55, "b": 45},
         legend={"orientation": "h", "y": 1.02, "x": 0},
         hoverlabel={"namelength": -1},
     )
@@ -325,6 +325,7 @@ class PlotActivities(RunningActivities):
         super().__init__(
             running_activities.data, prediction=running_activities._prediction
         )
+        self._name = running_activities.name
         self._data = self._data[
             [
                 "timestamp",
@@ -442,7 +443,7 @@ class PlotActivities(RunningActivities):
         plotly.graph_objects.Figure
             Filled altitude profile against the distance in km.
         """
-        fig = _base_layout(go.Figure(), "Altitude Profile")
+        fig = _base_layout(go.Figure(), "Altitude Profile", self.name)
 
         show_legend: dict[DropCategory, bool] = {
             "Uphill": True,
@@ -546,7 +547,7 @@ class PlotActivities(RunningActivities):
         }
         if latitude.notna().sum() < 2 or longitude.notna().sum() < 2:
             raise ValueError("L'activité ne contient pas de coordonnées GPS valides.")
-        fig = _base_layout(go.Figure(map_trace(**trace)), "Parcours GPS")
+        fig = _base_layout(go.Figure(map_trace(**trace)), "Parcours GPS", self.name)
         map_options = {
             "style": "open-street-map",
             "center": {"lat": latitude.mean(), "lon": longitude.mean()},
@@ -628,7 +629,7 @@ class PlotActivities(RunningActivities):
         color_difference = np.sign(difference) * np.log1p(np.abs(difference))
         _segment_width = np.repeat(self._segment_width, len(data))
 
-        fig = _base_layout(go.Figure(), "Allure par segment")
+        fig = _base_layout(go.Figure(), "Allure par segment", self.name)
         fig.add_trace(
             go.Bar(
                 x=distance / 1000,
@@ -699,6 +700,7 @@ class PlotActivities(RunningActivities):
         fig = _base_layout(
             make_subplots(specs=[[{"secondary_y": True}]]),
             "Fréquence cardiaque et altitude",
+            self.name,
         )
         fig.add_trace(
             go.Scatter(
@@ -753,6 +755,7 @@ class PlotActivities(RunningActivities):
         fig = _base_layout(
             make_subplots(specs=[[{"secondary_y": True}]]),
             "Vitesse et altitude",
+            self.name,
         )
 
         customdata = self.target.to_numpy().reshape(-1, 1)
@@ -852,7 +855,9 @@ class PlotActivities(RunningActivities):
         if self.prediction is None:
             raise ValueError("No prediction available")
 
-        fig = _base_layout(make_subplots(rows=2, cols=1), "Prediction vs True Target")
+        fig = _base_layout(
+            make_subplots(rows=2, cols=1), "Prediction vs True Target", self.name
+        )
         fig.add_trace(
             go.Scatter(
                 x=self.distance_km,
@@ -917,7 +922,9 @@ class PlotActivities(RunningActivities):
 
         total = sum(durations.values())
         values = np.array(list(durations.values()))
-        fig = _base_layout(go.Figure(), "Temps passé dans les zones cardiaques")
+        fig = _base_layout(
+            go.Figure(), "Temps passé dans les zones cardiaques", self.name
+        )
         fig.add_trace(
             go.Bar(
                 y=list(durations),
