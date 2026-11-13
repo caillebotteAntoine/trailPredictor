@@ -1,15 +1,43 @@
-"""Low-level reading and writing of FIT files."""
+"""Low-level reading of FIT files."""
 
-import pandas as pd
-from collections import defaultdict
 import gzip
 import io
-from pathlib import Path
+from collections import defaultdict
 from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 import fitdecode
 
 ProgressCallback = Callable[[float, str], None]
+
+
+def message_fields(
+    frame: fitdecode.FitDataMessage,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Extract the non-null fields of a FIT data message.
+
+    Parameters
+    ----------
+    frame : fitdecode.FitDataMessage
+        Decoded data message.
+
+    Returns
+    -------
+    values : dict[str, Any]
+        Value of each field, fields without a value being omitted.
+    units : dict[str, str]
+        Unit of each field that has a value and a unit.
+    """
+    values: dict[str, Any] = {}
+    units: dict[str, str] = {}
+    for field in frame.fields:
+        if field.value is None:
+            continue
+        values[field.name] = field.value
+        if field.units:
+            units[field.name] = field.units
+    return values, units
 
 
 def load_fit_file(
@@ -56,17 +84,13 @@ def load_fit_file(
                 )
             if not isinstance(frame, fitdecode.FitDataMessage):
                 continue
-            row = {}
-            for f in frame.fields:
-                if f.value is None:
-                    continue
-                row[f.name] = f.value
-                if f.units:
-                    units[frame.name][f.name] = f.units
+            row, field_units = message_fields(frame)
+            if field_units:
+                units[frame.name].update(field_units)
             content[frame.name].append(row)
 
     # merge all rows of records according to their timestamp
-    record_merge: dict[Any:dict] = {}
+    record_merge: dict[Any, dict] = {}
     for i, row in enumerate(content["record"]):
         if row["timestamp"] in record_merge:
             record_merge[row["timestamp"]].update(row)
@@ -79,27 +103,3 @@ def load_fit_file(
         progress_cb(1.0, "FIT file loaded")
 
     return content, units
-
-
-def to_fit(data: pd.DataFrame, units: dict[str, dict[str, str]] | None = None) -> bytes:
-    """Convert a DataFrame to a FIT file.
-
-    Parameters
-    ----------
-    data : pandas.DataFrame
-        One ``record`` message per row.
-    units : dict[str, dict[str, str]], optional
-        Field units by message type; only the ``"record"`` entry is used.
-
-    Returns
-    -------
-    bytes
-        Content of the FIT file.
-    """
-    buffer = io.BytesIO()
-    with fitdecode.FitWriter(buffer) as fit:
-        for _, row in data.iterrows():
-            fit.write_message(
-                "record", row.to_dict(), units=units.get("record") if units else None
-            )
-    return buffer.getvalue()
