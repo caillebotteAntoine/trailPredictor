@@ -61,6 +61,10 @@ repos:
             "--accept-no-return-doc=no",
             "--accept-no-raise-doc=no",
             "--accept-no-param-doc=no",
+            # Plot classes subclass Dataset / RunningActivities whose .plot
+            # property returns them: the cycle is intended, broken by lazy
+            # imports at runtime.
+            "--disable=cyclic-import",
           ]
 
       # Same checks for tests, minus rules that clash with pytest:
