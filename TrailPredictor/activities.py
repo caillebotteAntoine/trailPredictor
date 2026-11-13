@@ -1,3 +1,5 @@
+"""Single running activity aggregated into fixed-width distance segments."""
+
 from pathlib import Path
 from warnings import warn
 
@@ -17,6 +19,27 @@ def _get_computed_file_path(file_path: str, segment_width: int) -> Path:
 
 
 class RunningActivities:
+    """Running activity split into segments of constant distance.
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        One row per segment, with at least a cumulative ``distance`` column
+        in metres.
+    prediction : pandas.Series, optional
+        Predicted target for each segment. Its name must be the target name
+        followed by ``"_pred"`` (e.g. ``"pace_pred"``).
+
+    Raises
+    ------
+    ValueError
+        If `prediction` is given without a name.
+
+    See Also
+    --------
+    TrailPredictor.dataset.Dataset : Several activities stacked together.
+    """
+
     def __init__(self, data: pd.DataFrame, prediction: pd.Series | None = None):
         self._data = data
         self._segment_width = data["distance"].diff().max()
@@ -31,6 +54,13 @@ class RunningActivities:
 
     @property
     def target_name(self) -> str:
+        """Name of the predicted target.
+
+        Raises
+        ------
+        ValueError
+            If the activity has no prediction.
+        """
         if self._target_name is None:
             raise ValueError("No prediction available, target is None.")
         return self._target_name
@@ -47,7 +77,13 @@ class RunningActivities:
 
     @property
     def prediction(self) -> pd.Series:
-        """Return a copy of the prediction series."""
+        """Return a copy of the prediction series.
+
+        Raises
+        ------
+        ValueError
+            If the activity has no prediction.
+        """
         if self._prediction is None:
             raise ValueError("No prediction available, prediction is None.")
         return self._prediction.copy()
@@ -59,7 +95,13 @@ class RunningActivities:
 
     @property
     def plot(self):
-        """Return a PlotActivities object for plotting the activity."""
+        """Return a plotting interface of the activity.
+
+        Returns
+        -------
+        PlotActivities
+            Plotting interface built from a copy of the activity.
+        """
         from TrailPredictor.plot import PlotActivities
 
         return PlotActivities(self)
@@ -74,7 +116,29 @@ class RunningActivities:
     # ==================================================================================== #
     @classmethod
     def from_fit_record(cls, record: pd.DataFrame, segment_width: int = 100):
-        """Create an activity from a FIT record DataFrame."""
+        """Create an activity from the ``record`` messages of a FIT file.
+
+        Missing values are filled, points are averaged into segments of
+        `segment_width` metres and the speed / pace columns are added.
+
+        Parameters
+        ----------
+        record : pandas.DataFrame
+            Raw ``record`` messages, with at least ``timestamp``,
+            ``distance``, ``altitude`` or ``enhanced_altitude``,
+            ``position_lat`` and ``position_long``. It is not modified.
+        segment_width : int, optional
+            Segment length in metres. Default is 100.
+
+        Returns
+        -------
+        RunningActivities
+            The segmented activity.
+
+        See Also
+        --------
+        from_fit_file : Read the records from a FIT file first.
+        """
         x = record.copy()
 
         # fill missing values
@@ -150,7 +214,26 @@ class RunningActivities:
         segment_width: int = 100,
         progress_cb: ProgressCallback | None = None,
     ):
-        """Create an activity from a FIT file and optionally report progress."""
+        """Create an activity from a FIT file and cache it as CSV.
+
+        Parameters
+        ----------
+        file_path : str
+            Path of the FIT file, relative to ``DATA_DIR``.
+        segment_width : int, optional
+            Segment length in metres. Default is 100.
+        progress_cb : ProgressCallback, optional
+            Called with ``(fraction, message)`` while loading.
+
+        Returns
+        -------
+        RunningActivities
+            The segmented activity.
+
+        See Also
+        --------
+        from_computed_file : Reuse the cached CSV when it exists.
+        """
         path = DATA_DIR / file_path
 
         content, _ = load_fit_file(
@@ -184,7 +267,26 @@ class RunningActivities:
         segment_width: int = 100,
         progress_cb: ProgressCallback | None = None,
     ):
-        """Create an activity from a computed file"""
+        """Create an activity from its cached CSV, or from the FIT file.
+
+        Parameters
+        ----------
+        file_path : str
+            Path of the original FIT file, relative to ``DATA_DIR``.
+        segment_width : int, optional
+            Segment length in metres. Default is 100.
+        progress_cb : ProgressCallback, optional
+            Called with ``(fraction, message)`` while loading.
+
+        Returns
+        -------
+        RunningActivities
+            The segmented activity.
+
+        See Also
+        --------
+        from_fit_file : Fallback used when no cached CSV exists.
+        """
         path = DATA_DIR / file_path
 
         # try to load from the computed folder first

@@ -1,3 +1,5 @@
+"""Low-level reading and writing of FIT files."""
+
 import pandas as pd
 from collections import defaultdict
 import gzip
@@ -15,8 +17,27 @@ def load_fit_file(
     progress_cb: ProgressCallback | None = None,
     update_every: int = 500,
 ):
-    """Load a FIT file and optionally report parsing progress."""
+    """Load a FIT file and optionally report parsing progress.
 
+    Parameters
+    ----------
+    file_path : pathlib.Path
+        Path to a ``.fit`` or gzip-compressed ``.fit.gz`` file.
+    progress_cb : ProgressCallback, optional
+        Called with ``(fraction, message)`` while parsing, ``fraction`` being
+        in ``[0, 1]``.
+    update_every : int, optional
+        Number of frames between two progress reports. Default is 500.
+
+    Returns
+    -------
+    content : dict[str, list[dict]]
+        Messages by type (``"record"``, ``"lap"``, ...), each message being
+        a dict of its non-null fields. ``"record"`` messages sharing a
+        timestamp are merged.
+    units : dict[str, dict[str, str]]
+        Unit of each field, by message type.
+    """
     raw = file_path.read_bytes()
     if raw[:2] == b"\x1f\x8b":  # gzip
         raw = gzip.decompress(raw)
@@ -61,7 +82,20 @@ def load_fit_file(
 
 
 def to_fit(data: pd.DataFrame, units: dict[str, dict[str, str]] | None = None) -> bytes:
-    """Convert a DataFrame to a FIT file."""
+    """Convert a DataFrame to a FIT file.
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        One ``record`` message per row.
+    units : dict[str, dict[str, str]], optional
+        Field units by message type; only the ``"record"`` entry is used.
+
+    Returns
+    -------
+    bytes
+        Content of the FIT file.
+    """
     buffer = io.BytesIO()
     with fitdecode.FitWriter(buffer) as fit:
         for _, row in data.iterrows():

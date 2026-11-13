@@ -1,3 +1,5 @@
+"""Plotly figures for the dataset, the activities and the Minetti curves."""
+
 from collections.abc import Callable
 from typing import Literal, TypeAlias
 
@@ -79,6 +81,18 @@ TARGETS_COLORS = {
 
 
 class PlotDataset(Dataset):
+    """Plotting interface of a dataset.
+
+    Parameters
+    ----------
+    dataset : Dataset
+        Dataset to plot; its data and target are copied.
+
+    See Also
+    --------
+    PlotActivities : Plots of a single activity.
+    """
+
     def __init__(self, dataset: Dataset):
         super().__init__(dataset._data, target=dataset.target_name)
 
@@ -95,7 +109,23 @@ class PlotDataset(Dataset):
     def merge_figure(
         self, plot_fct: Callable[[], go.Figure], title: str, **kwargs
     ) -> go.Figure:
-        """Merge a figure with the target histogram."""
+        """Draw the same figure for every target on a 3 x 3 grid.
+
+        Parameters
+        ----------
+        plot_fct : Callable[..., plotly.graph_objects.Figure]
+            Bound plotting method (e.g. ``self.target_histogram``), called
+            once per target with `kwargs`.
+        title : str
+            Title of the merged figure.
+        **kwargs
+            Extra keyword arguments passed to `plot_fct`.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure
+            One subplot per target; the current target is restored.
+        """
         merged = make_subplots(
             rows=3,
             cols=3,
@@ -139,7 +169,13 @@ class PlotDataset(Dataset):
     #                             TARGET HISTOGRAM PLOT
     # ================================================================================= #
     def target_histogram(self) -> go.Figure:
-        """Display a histogram of the target variable."""
+        """Plot the histogram of the target.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure
+            Histogram with 50 bins.
+        """
         fig = _base_layout(go.Figure(), f"Histogram of {self.target_name}")
         fig.add_trace(
             go.Histogram(
@@ -157,7 +193,23 @@ class PlotDataset(Dataset):
     #                             TARGET VS FEATURE PLOT
     # ================================================================================= #
     def target_vs_feat(self, features="altitude_drop") -> go.Figure:
-        """Display a scatter plot of the target variable vs altitude drop."""
+        """Plot the target against a feature, one point per segment.
+
+        Parameters
+        ----------
+        features : str, optional
+            Name of a numeric column. Default is ``"altitude_drop"``.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure
+            Scatter plot of the target vs the feature.
+
+        Raises
+        ------
+        ValueError
+            If the feature is missing, not numeric or only missing values.
+        """
         if features not in self._data.columns:
             raise ValueError(f"Invalid feature: {features}")
         values = self._data[features]
@@ -183,9 +235,19 @@ class PlotDataset(Dataset):
     #                                 VS PREDICTION PLOT
     # ================================================================================= #
     def vs_prediction(self) -> go.Figure:
-        """Display a scatter plot of the target variable vs the predicted values on
-        one column and the residuals on the other column."""
+        """Plot the predictions against the true values, and the residuals.
 
+        Returns
+        -------
+        plotly.graph_objects.Figure
+            Two subplots: predicted vs true values with the unity line, and
+            residuals vs predicted values.
+
+        Raises
+        ------
+        ValueError
+            If no prediction is set.
+        """
         fig = _base_layout(
             make_subplots(
                 rows=1, cols=2, subplot_titles=["Target vs Prediction", "Residuals"]
@@ -246,6 +308,24 @@ class PlotDataset(Dataset):
 
 
 class PlotActivities(RunningActivities):
+    """Plotting interface of a single activity.
+
+    Each segment is labelled with a drop category (uphill, downhill, flat)
+    and a heart-rate zone.
+
+    Parameters
+    ----------
+    running_activities : RunningActivities
+        Activity to plot; its data and prediction are copied.
+    drop_threshold : float, optional
+        Altitude change in metres above which a segment is uphill (below its
+        opposite, downhill). Default is 2.0.
+
+    See Also
+    --------
+    PlotDataset : Plots of the whole dataset.
+    """
+
     def __init__(
         self, running_activities: RunningActivities, drop_threshold: float = 2.0
     ):
@@ -287,6 +367,7 @@ class PlotActivities(RunningActivities):
 
     @property
     def target_label(self) -> str:
+        """Return the target name with its unit."""
         return f"{self.target_name} ({TARGETS_UNITS[self.target_name]})"
 
     @property
@@ -296,6 +377,20 @@ class PlotActivities(RunningActivities):
 
     @property
     def iter_drop_categories(self):
+        """Iterate over the contiguous runs of each drop category.
+
+        Each run is extended by one segment on each side so that the drawn
+        lines join; runs shorter than two segments are skipped.
+
+        Yields
+        ------
+        category : DropCategory
+            Drop category of the run.
+        idx : numpy.ndarray
+            Positional indices of the segments of the run.
+        segment : pandas.DataFrame
+            Rows of the run.
+        """
         n = len(self._data)
 
         for category in DropCategory.__args__:
@@ -314,7 +409,20 @@ class PlotActivities(RunningActivities):
                 yield (category, idx, self._data.iloc[idx])
 
     def iter_heart_rate_zones(self):
+        """Iterate over the contiguous runs of each heart-rate zone.
 
+        Each run is extended by one segment on each side so that the drawn
+        lines join; runs shorter than two segments are skipped.
+
+        Yields
+        ------
+        zone : HearthRateZoneLabel
+            Heart-rate zone of the run.
+        idx : numpy.ndarray
+            Positional indices of the segments of the run.
+        segment : pandas.DataFrame
+            Rows of the run.
+        """
         for zone in HearthRateZoneLabel.__args__:
             indexes = np.flatnonzero(self._data["heart_rate_zone"] == zone)
             if not len(indexes):
@@ -334,6 +442,13 @@ class PlotActivities(RunningActivities):
     #                                   ALTITUDE PLOT
     # ===================================================================================== #
     def altitude(self) -> go.Figure:
+        """Plot the altitude profile coloured by drop category.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure
+            Filled altitude profile against the distance in km.
+        """
         fig = _base_layout(go.Figure(), "Altitude Profile")
 
         show_legend: dict[DropCategory, bool] = {
@@ -375,7 +490,26 @@ class PlotActivities(RunningActivities):
         color_by: Literal["altitude", "heart_rate", "pace"] = "altitude",
         show_km_markers: bool = True,
     ) -> go.Figure:
-        """Display the GPS track on an OpenStreetMap background."""
+        """Plot the GPS track on an OpenStreetMap background.
+
+        Parameters
+        ----------
+        color_by : {"altitude", "heart_rate", "pace"}, optional
+            Variable used to colour the track. Default is ``"altitude"``.
+        show_km_markers : bool, optional
+            Add a marker at each kilometre. Default is True.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure
+            Map of the track.
+
+        Raises
+        ------
+        ValueError
+            If `color_by` is invalid or the activity has no valid GPS
+            coordinates.
+        """
         data = self._data.copy()
         latitude = data["position_lat"]
         longitude = data["position_long"]
@@ -480,7 +614,14 @@ class PlotActivities(RunningActivities):
     #                                   PACE PLOT
     # ================================================================================= #
     def pace_by_segment(self) -> go.Figure:
-        """Display segment pace with bars sized by covered distance."""
+        """Plot the pace of each segment.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure
+            Bar chart of the pace, each bar spanning the distance covered by
+            its segment.
+        """
         data = self._data.copy()
         distance = data["distance"]
         pace = pd.to_numeric(self._data["pace"], errors="coerce")
@@ -538,8 +679,23 @@ class PlotActivities(RunningActivities):
     #                                   HEART RATE PLOT
     # =================================================================================== #
     def hr_overlay(self, x_axis: Literal["distance", "time"] = "distance") -> go.Figure:
-        """Overlay heart rate and altitude on two y axes."""
+        """Overlay heart rate and altitude on two y axes.
 
+        Parameters
+        ----------
+        x_axis : {"distance", "time"}, optional
+            Quantity on the x axis. Default is ``"distance"``.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure
+            Heart rate (left axis) and altitude (right axis).
+
+        Raises
+        ------
+        ValueError
+            If `x_axis` is invalid.
+        """
         if x_axis not in ("distance", "time"):
             raise ValueError("x_axis must be 'distance' or 'time'")
         data = self._data.copy()
@@ -586,8 +742,20 @@ class PlotActivities(RunningActivities):
     #                                   SPEED PLOT
     # ================================================================================== #
     def speed(self) -> go.Figure:
-        """Overlay speed (true and predicted is available) and altitude on two y axes."""
+        """Overlay speed and altitude on two y axes.
 
+        Returns
+        -------
+        plotly.graph_objects.Figure
+            True speed, predicted speed when a prediction is available (left
+            axis) and altitude (right axis).
+
+        Raises
+        ------
+        ValueError
+            If reading the prediction fails for another reason than a
+            missing prediction.
+        """
         data = self._data.copy()
         x = self.distance_km
         fig = _base_layout(
@@ -676,7 +844,19 @@ class PlotActivities(RunningActivities):
     #                                   PREDICTION PLOT
     # ================================================================================== #
     def error_prediction(self) -> go.Figure:
-        """Display the predicted speed vs the true speed on a row of the plot and error histogram on the other row."""
+        """Plot the predicted vs true speed and the error histogram.
+
+        Returns
+        -------
+        plotly.graph_objects.Figure
+            Two rows: predicted and true speed, then the histogram of the
+            prediction error.
+
+        Raises
+        ------
+        ValueError
+            If no prediction is available.
+        """
         if self.prediction is None:
             raise ValueError("No prediction available")
 
@@ -726,8 +906,13 @@ class PlotActivities(RunningActivities):
     #                                   TIME IN HEART RATE ZONES PLOT
     # ================================================================================== #
     def time_in_hr_zones(self) -> go.Figure:
-        """Display time spent in heart-rate zones."""
+        """Plot the time spent in each heart-rate zone.
 
+        Returns
+        -------
+        plotly.graph_objects.Figure
+            Bar chart of the duration per zone.
+        """
         durations = {
             zone: self._data.loc[self._data["heart_rate_zone"].eq(zone), "elapsed_time"]
             .dt.total_seconds()
@@ -761,7 +946,18 @@ class PlotActivities(RunningActivities):
 #                                   MINETTI PLOT
 # ================================================================================= #
 def plot_minetti_curve() -> go.Figure:
-    """Plot Minetti energy costs relative to flat terrain."""
+    """Plot the Minetti energy costs relative to flat terrain.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+        Walking and running costs for slopes from -35 % to 35 %.
+
+    See Also
+    --------
+    TrailPredictor.minetti.cost_of_running : Running energy cost.
+    TrailPredictor.minetti.cost_of_walking : Minimum walking energy cost.
+    """
     slopes = np.linspace(-0.35, 0.35, 100)
     walking_cost = cost_of_walking(slopes)
     running_cost = cost_of_running(slopes)

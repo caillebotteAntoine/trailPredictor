@@ -1,3 +1,5 @@
+"""Loading of the Strava activity summary export."""
+
 from pathlib import Path
 
 import pandas as pd
@@ -142,7 +144,21 @@ activity_dtypes_map = {
 
 
 def load_activities() -> pd.DataFrame:
-    """Load activities from the CSV file and convert columns to appropriate types."""
+    """Load the Strava activity summary.
+
+    The French column names and activity types of the export are mapped to
+    English identifiers and the numeric columns are converted.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per activity.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``ACTIVITIES_FILE`` does not exist.
+    """
     activities = (
         pd.read_csv(ACTIVITIES_FILE, sep=",", decimal=".", encoding="utf-8")
         .rename(columns=activity_column_map)

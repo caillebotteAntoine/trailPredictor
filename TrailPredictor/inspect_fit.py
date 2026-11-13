@@ -1,26 +1,25 @@
-"""
-Inspection exhaustive d'UN fichier .fit (ou .fit.gz) pour savoir ce qu'il contient.
+"""Exhaustive inspection of ONE .fit (or .fit.gz) file to see what it contains.
 
-Dépendances :
-    pip install fitdecode pandas numpy
+Command line usage::
 
-Usage en ligne de commande :
     python inspect_fit.py activities/123456.fit.gz
-    python inspect_fit.py activities/123456.fit.gz --export-csv sortie_123456
+    python inspect_fit.py activities/123456.fit.gz --export-csv output_123456
 
-Usage en notebook :
+Notebook usage::
+
     from inspect_fit import load_messages, inspect_fit
     report = inspect_fit("activities/123456.fit.gz")
-    report["record"].head()          # DataFrame brut des points enregistrés
-    report["fields_record"]          # dictionnaire des champs de 'record'
+    report["record"].head()          # raw DataFrame of the recorded points
+    report["fields_record"]          # field profile of 'record'
 
-Ce que le script affiche :
-    1. Inventaire des types de messages (record, lap, session, event, ...)
-    2. Pour chaque type : champs, unités, taux de remplissage, exemple, min/max
-    3. Informations fichier / appareil / sport / session
-    4. Diagnostics sur la série temporelle (fréquence d'échantillonnage, pauses,
-       GPS, D+ recalculé vs D+ de la session, capteurs présents)
-    5. Tours (laps) et événements (start / stop du chrono)
+The script prints:
+
+1. Inventory of the message types (record, lap, session, event, ...).
+2. For each type: fields, units, fill rate, example, min / max.
+3. File / device / sport / session information.
+4. Time series diagnostics (sampling rate, pauses, GPS, recomputed vs
+   session elevation gain, available sensors).
+5. Laps and events (timer start / stop).
 """
 
 from __future__ import annotations
@@ -48,11 +47,24 @@ pd.set_option("display.max_colwidth", 45)
 def load_messages(
     path: str | Path,
 ) -> tuple[dict[str, list[dict]], dict[str, dict[str, str]]]:
-    """
-    Lit tout le fichier et renvoie :
-      - messages : {type_de_message: [dict de champs, ...]}
-      - units    : {type_de_message: {champ: unité}}
-    Les champs sans valeur (None) sont omis.
+    """Read every message of a FIT file.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        Path to a ``.fit`` or gzip-compressed ``.fit.gz`` file.
+
+    Returns
+    -------
+    messages : dict[str, list[dict]]
+        Messages by type, each message being a dict of its fields. Fields
+        without a value (``None``) are omitted.
+    units : dict[str, dict[str, str]]
+        Unit of each field, by message type.
+
+    See Also
+    --------
+    TrailPredictor.load_fit.load_fit_file : Same reading with progress report.
     """
     path = Path(path)
     raw = path.read_bytes()
@@ -86,7 +98,21 @@ def _short(value, width: int = 38) -> str:
 
 
 def profile_fields(df: pd.DataFrame, units: dict[str, str]) -> pd.DataFrame:
-    """Une ligne par champ : remplissage, type, exemple, min / moyenne / max."""
+    """Profile each field of a message type.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Messages of one type, one column per field.
+    units : dict[str, str]
+        Unit of each field.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per field: unit, fill count and rate, type, number of unique
+        values, min / mean / max and an example value.
+    """
     n = len(df)
     rows = []
     for col in df.columns:
@@ -122,6 +148,19 @@ def profile_fields(df: pd.DataFrame, units: dict[str, str]) -> pd.DataFrame:
 # Diagnostics de la série temporelle
 # --------------------------------------------------------------------------- #
 def diagnose_records(rec: pd.DataFrame) -> None:
+    """Print diagnostics on the ``record`` time series.
+
+    Parameters
+    ----------
+    rec : pandas.DataFrame
+        ``record`` messages, one column per field.
+
+    Notes
+    -----
+    Covers the sampling rate and gaps, distance and speed, altitude and
+    smoothed elevation gain, GPS coverage, available sensors and
+    non-standard fields.
+    """
     if rec.empty:
         print("  (aucun message 'record' dans ce fichier)")
         return
@@ -266,7 +305,7 @@ def _print_header(title: str) -> None:
 
 
 def _print_single_message(name: str, rows: list[dict], units: dict[str, str]) -> None:
-    """Affiche en clair les messages uniques (file_id, session, sport, ...)."""
+    """Print single messages (file_id, session, sport, ...) in plain text."""
     for i, row in enumerate(rows):
         if len(rows) > 1:
             print(f"  -- {name} #{i + 1}")
@@ -278,6 +317,29 @@ def _print_single_message(name: str, rows: list[dict], units: dict[str, str]) ->
 def inspect_fit(
     path: str | Path, max_laps: int = 40, export_csv: str | Path | None = None
 ) -> dict:
+    """Print a full report of a FIT file and return its content.
+
+    Parameters
+    ----------
+    path : str or pathlib.Path
+        Path to a ``.fit`` or ``.fit.gz`` file.
+    max_laps : int, optional
+        Maximum number of laps printed. Default is 40.
+    export_csv : str or pathlib.Path, optional
+        Directory where each message type and its field profile are
+        exported as CSV.
+
+    Returns
+    -------
+    dict
+        One DataFrame per message type (e.g. ``report["record"]``) and its
+        field profile under ``"fields_<type>"``.
+
+    See Also
+    --------
+    load_messages : Reads the messages.
+    profile_fields : Builds the field profiles.
+    """
     path = Path(path)
     messages, units = load_messages(path)
     frames = {name: pd.DataFrame(rows) for name, rows in messages.items()}

@@ -1,3 +1,5 @@
+"""Dataset of segmented running activities used to train the models."""
+
 from typing import Literal, TypeAlias, cast
 
 import numpy as np
@@ -30,8 +32,27 @@ EXCLUDED_COLUMNS = set(META_COLUMNS + TARGET_COLUMNS + PREDICTION_COLUMNS)
 
 
 def infer_segment_width(data: pd.DataFrame) -> float:
-    """Segment width in meters, estimated inside each activity (robust to the
-    jump between two activities)."""
+    """Infer the segment width from the cumulative distance.
+
+    The width is the median distance step computed inside each activity, so
+    it is robust to the jump between two consecutive activities.
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        Data with ``activity_id`` and cumulative ``distance`` (metres)
+        columns.
+
+    Returns
+    -------
+    float
+        Segment width in metres.
+
+    Raises
+    ------
+    ValueError
+        If no finite, strictly positive width can be inferred.
+    """
     width = data.groupby("activity_id")["distance"].diff().median()
     if not np.isfinite(width) or width <= 0:
         raise ValueError("Cannot infer a positive segment width from 'distance'.")
@@ -39,6 +60,28 @@ def infer_segment_width(data: pd.DataFrame) -> float:
 
 
 class Dataset:
+    """Segments of several activities with their features and target.
+
+    Parameters
+    ----------
+    dataset : pandas.DataFrame
+        Raw segments of several activities, with at least ``activity_id``,
+        ``distance``, ``altitude``, ``timestamp``, ``elapsed_time`` and
+        ``speed`` columns. It is not modified.
+    target : Target, optional
+        Name of the column to predict. Default is ``"pace"``.
+
+    Raises
+    ------
+    ValueError
+        If the segment width cannot be inferred or a speed / pace column is
+        missing after the preparation.
+
+    See Also
+    --------
+    load : Build the dataset from the FIT files, with a CSV cache.
+    """
+
     def __init__(
         self,
         dataset: pd.DataFrame,
@@ -70,7 +113,13 @@ class Dataset:
 
     @property
     def target_name(self) -> Target:
-        """Return the target name."""
+        """Return the target name.
+
+        Raises
+        ------
+        ValueError
+            If the target is not one of ``TARGETS``.
+        """
         if self._target_name not in TARGETS:
             raise ValueError("Invalid target")
         return self._target_name
@@ -86,8 +135,21 @@ class Dataset:
         return self._data.copy()
 
     def get_preprocess(self):
-        """Standardise every feature (except the 0-1 ratios). Put it in a
-        Pipeline so that the mean / sd are computed on the training set only."""
+        """Build the preprocessing step that standardises the features.
+
+        Every feature is scaled except the ``*_ratio`` features, which are
+        already in ``[0, 1]``.
+
+        Returns
+        -------
+        sklearn.compose.ColumnTransformer
+            Unfitted transformer with pandas output.
+
+        Notes
+        -----
+        Put it in a ``Pipeline`` so that the mean and standard deviation are
+        computed on the training set only.
+        """
         from sklearn.compose import ColumnTransformer
         from sklearn.preprocessing import StandardScaler
 
@@ -101,7 +163,13 @@ class Dataset:
 
     @property
     def target(self) -> pd.Series:
-        """Return the target column."""
+        """Target column; setting it changes the target name.
+
+        Raises
+        ------
+        ValueError
+            If the new target is not one of ``TARGETS``.
+        """
         return self._data[self._target_name].copy()
 
     @target.setter
@@ -117,7 +185,14 @@ class Dataset:
 
     @property
     def prediction(self) -> pd.Series:
-        """Return the prediction column corresponding to the target."""
+        """Prediction column of the target.
+
+        Raises
+        ------
+        ValueError
+            If no prediction is set, or a new prediction does not have one
+            value per segment.
+        """
         if self.prediction_label not in self._data.columns:
             raise ValueError(
                 f"Prediction column '{self.prediction_label}' not found in dataset."
@@ -127,7 +202,19 @@ class Dataset:
 
     @prediction.setter
     def prediction(self, predictions: pd.Series):
-        """Set the prediction column corresponding to the target."""
+        """Set the prediction column of the target.
+
+        Parameters
+        ----------
+        predictions : pandas.Series
+            One value per segment, converted to ``float64`` (invalid values
+            become NaN).
+
+        Raises
+        ------
+        ValueError
+            If `predictions` does not have one value per segment.
+        """
         if len(predictions) != len(self._data):
             raise ValueError("Length of predictions does not match length of dataset.")
 
@@ -139,6 +226,7 @@ class Dataset:
 
     @property
     def predictors(self) -> pd.DataFrame:
+        """Return a copy of the feature columns."""
         return cast(pd.DataFrame, self._data[self._features].copy())
 
     @property
@@ -148,7 +236,18 @@ class Dataset:
 
     @features.setter
     def features(self, features: list[str]):
-        """Set the candidate feature names."""
+        """Set the candidate feature names.
+
+        Parameters
+        ----------
+        features : list of str
+            Columns of the dataset to use as predictors.
+
+        Raises
+        ------
+        ValueError
+            If a feature is not a column, or is a target or prediction column.
+        """
         for feature in features:
             if feature not in self._data.columns:
                 raise ValueError(f"Feature '{feature}' not found in dataset.")
@@ -158,8 +257,7 @@ class Dataset:
 
     @property
     def true_total_time(self) -> pd.Series:
-        """Total time of each activity (Timedelta): elapsed_time is the duration
-        of each segment, so the sum over an activity is its total time."""
+        """Total time of each activity, as the sum of the segment durations."""
         return (
             self._data.groupby("activity_id")["elapsed_time"]
             .sum()
@@ -167,17 +265,33 @@ class Dataset:
         )
 
     def smearing_factor(self) -> float:
-        """Correction factor for the total time when the target is a log.
+        """Compute the correction factor of the total time for a log target.
 
-        exp(prediction) is a median / geometric mean, which under-estimates the
-        *expected* time per segment (stops and aid stations make the pace
-        distribution heavy-tailed), so the total time is too small.
-        Duan's smearing multiplies the time by mean(exp(residual)).
+        Returns
+        -------
+        float
+            Duan's smearing factor ``mean(exp(residual))`` for ``log_pace``
+            (``exp(-residual)`` for ``log_speed``), 1.0 for the non-log
+            targets.
 
-        Compute it on the TRAINING set (ideally with out-of-fold predictions,
-        in-sample residuals of a flexible model are too small), then pass it to
-        `predict_total_time(smearing=...)` of the test dataset.
-        Returns 1.0 for the non-log targets.
+        See Also
+        --------
+        predict_total_time : Uses this factor through its `smearing` argument.
+
+        Notes
+        -----
+        ``exp(prediction)`` is a median / geometric mean, which under-estimates
+        the *expected* time per segment (stops and aid stations make the pace
+        distribution heavy-tailed), so the total time is too small [1]_.
+
+        Compute it on the training set (ideally with out-of-fold predictions,
+        since in-sample residuals of a flexible model are too small), then
+        pass it to ``predict_total_time(smearing=...)`` of the test dataset.
+
+        References
+        ----------
+        .. [1] Duan, N., "Smearing Estimate: A Nonparametric Retransformation
+           Method", Journal of the American Statistical Association, 1983.
         """
         if self._target_name not in ("log_pace", "log_speed"):
             return 1.0
@@ -187,8 +301,19 @@ class Dataset:
         return float(np.exp(-residual).mean())  # time ∝ 1 / speed = exp(-y)
 
     def predict_target_to_speed(self) -> pd.Series:
-        """Convert the predicted target to a speed in m/s, for total time computation."""
+        """Convert the predicted target to a speed.
 
+        Returns
+        -------
+        pandas.Series
+            Predicted speed in m/s, named ``"predicted_speed"``, clipped to a
+            small positive value to avoid dividing by zero.
+
+        Raises
+        ------
+        ValueError
+            If no prediction is set, or its name does not match the target.
+        """
         predicted = self.prediction
 
         if self.prediction_label != predicted.name:
@@ -220,11 +345,28 @@ class Dataset:
         )
 
     def predict_total_time(self, smearing: float = 1.0) -> pd.Series:
-        """Predicted total time (Timedelta) of each activity.
+        """Predict the total time of each activity.
 
-        `pace` is the natural target for a total time (time = pace * distance).
-        With `speed` the sum of d / speed_pred is biased (E[1/v] != 1/E[v]).
-        With a log target, pass `smearing=train_dataset.smearing_factor()`.
+        Parameters
+        ----------
+        smearing : float, optional
+            Multiplicative correction of each segment time. Default is 1.0.
+            With a log target, pass ``train_dataset.smearing_factor()``.
+
+        Returns
+        -------
+        pandas.Series
+            Predicted total time (Timedelta), indexed by ``activity_id``.
+
+        See Also
+        --------
+        smearing_factor : Correction factor for a log target.
+
+        Notes
+        -----
+        ``pace`` is the natural target for a total time (time = pace x
+        distance). With ``speed``, the sum of ``d / speed_pred`` is biased
+        since E[1/v] != 1/E[v].
         """
         predicted_speed = self.predict_target_to_speed()
         segment_seconds = self._segment_width / predicted_speed * smearing
@@ -241,11 +383,35 @@ class Dataset:
 
     @property
     def plot(self):
+        """Return a plotting interface of the dataset.
+
+        Returns
+        -------
+        PlotDataset
+            Plotting interface built from a copy of the dataset.
+        """
         from TrailPredictor.plot import PlotDataset
 
         return PlotDataset(self)
 
     def get_activities(self, activity_id: int):
+        """Extract one activity, with its prediction when available.
+
+        Parameters
+        ----------
+        activity_id : int
+            Identifier of the activity in the ``activity_id`` column.
+
+        Returns
+        -------
+        RunningActivities
+            The segments of the activity.
+
+        Raises
+        ------
+        ValueError
+            If no segment has this `activity_id`.
+        """
         from TrailPredictor.activities import RunningActivities
 
         activity_data = cast(
@@ -263,6 +429,19 @@ class Dataset:
         return RunningActivities(activity_data, prediction=prediction)
 
     def split_test_train(self):
+        """Split the dataset into a training and a test set by activity.
+
+        Returns
+        -------
+        train : Dataset
+            Training activities, with the same target.
+        test : Dataset
+            Test activities, with the same target.
+
+        See Also
+        --------
+        TrailPredictor.features.split_test_train : Underlying split.
+        """
         train_data, test_data = split_test_train(self._data)
         return Dataset(train_data, self.target_name), Dataset(
             test_data, self.target_name
@@ -270,8 +449,11 @@ class Dataset:
 
     @staticmethod
     def _prepare_raw(raw: pd.DataFrame, segment_width: int) -> pd.DataFrame:
-        """Types + speed / pace columns. Same treatment whether the raw data
-        comes from the cache or from the FIT files."""
+        """Convert the time columns and add the speed / pace columns.
+
+        The same treatment is applied whether the raw data comes from the
+        cache or from the FIT files.
+        """
         raw["timestamp"] = pd.to_datetime(raw["timestamp"])
         raw["elapsed_time"] = pd.to_timedelta(raw["elapsed_time"])
         raw = add_speed_columns(raw)
@@ -286,6 +468,36 @@ class Dataset:
         progress_cb: ProgressCallback | None = None,
         export_features: bool = True,
     ):
+        """Load the dataset of the activities within a distance range.
+
+        Reading the FIT files is cached in ``COMPUTED_DIR``; the features are
+        always rebuilt, so a change in ``build_features`` is never ignored.
+
+        Parameters
+        ----------
+        min_distance : int, optional
+            Minimum activity distance in km (exclusive). Default is 40.
+        max_distance : int, optional
+            Maximum activity distance in km (exclusive). Default is 60.
+        segment_width : int, optional
+            Segment length in metres. Default is 1000.
+        progress_cb : ProgressCallback, optional
+            Called with ``(fraction, message)`` while reading the FIT files.
+        export_features : bool, optional
+            Also write the features to a CSV in ``COMPUTED_DIR``. Default is
+            True.
+
+        Returns
+        -------
+        Dataset
+            Dataset with ``"pace"`` as target.
+
+        Raises
+        ------
+        ValueError
+            If `min_distance` is not less than `max_distance`, or a speed /
+            pace column is missing.
+        """
         if min_distance >= max_distance:
             raise ValueError("min_distance must be less than max_distance")
 

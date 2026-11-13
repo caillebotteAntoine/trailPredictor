@@ -1,3 +1,5 @@
+"""Construction of the raw dataset and of the segment features."""
+
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
@@ -18,7 +20,33 @@ def export_activities(
     segment_width=500,
     progress_cb: ProgressCallback | None = None,
 ) -> list[RunningActivities]:
-    """Export running activities from a list of activities or load them from the default source."""
+    """Load the running activities within a distance range.
+
+    Parameters
+    ----------
+    activities : pandas.DataFrame, optional
+        Activity summary as returned by ``load_activities``, loaded from the
+        default CSV when omitted.
+    min_distance : float, optional
+        Minimum distance in km (exclusive). Default is 30.
+    max_distance : float, optional
+        Maximum distance in km (exclusive). Default is 100.
+    segment_width : int, optional
+        Segment length in metres. Default is 500.
+    progress_cb : ProgressCallback, optional
+        Progress reporter, also used to display the current activity.
+
+    Returns
+    -------
+    list of RunningActivities
+        One segmented activity per FIT file, longest first; activities
+        without a FIT file are skipped.
+
+    Raises
+    ------
+    AssertionError
+        If `min_distance` is not less than `max_distance`.
+    """
     if activities is None:
         activities = load_activities()
 
@@ -62,6 +90,30 @@ def create_dataset(
     segment_width=500,
     progress_cb: ProgressCallback | None = None,
 ) -> pd.DataFrame:
+    """Stack the segments of the running activities into one DataFrame.
+
+    Parameters
+    ----------
+    activities : pandas.DataFrame, optional
+        Activity summary, loaded from the default CSV when omitted.
+    min_distance : float, optional
+        Minimum distance in km (exclusive). Default is 30.
+    max_distance : float, optional
+        Maximum distance in km (exclusive). Default is 100.
+    segment_width : int, optional
+        Segment length in metres. Default is 500.
+    progress_cb : ProgressCallback, optional
+        Progress reporter.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Segments of all activities, with an ``activity_id`` column.
+
+    See Also
+    --------
+    export_activities : Loads the individual activities.
+    """
     running_activities = export_activities(
         activities, min_distance, max_distance, segment_width, progress_cb
     )
@@ -79,7 +131,26 @@ def create_dataset(
 def split_test_train(
     data: pd.DataFrame, test_size: float = 0.2, random_state: int = 42
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Split the dataset into a training and a test set and keeping activity_id together."""
+    """Split the dataset into a training and a test set by activity.
+
+    All the segments of an activity end up in the same set.
+
+    Parameters
+    ----------
+    data : pandas.DataFrame
+        Segments with an ``activity_id`` column.
+    test_size : float, optional
+        Fraction of the activities in the test set. Default is 0.2.
+    random_state : int, optional
+        Seed of the split. Default is 42.
+
+    Returns
+    -------
+    train_data : pandas.DataFrame
+        Segments of the training activities.
+    test_data : pandas.DataFrame
+        Segments of the test activities.
+    """
     activity_ids = data["activity_id"].unique()
     train_ids, test_ids = train_test_split(
         activity_ids, test_size=test_size, random_state=random_state
@@ -90,8 +161,11 @@ def split_test_train(
 
 
 def _window_sum(s: pd.Series, k: int, direction: str = "front") -> pd.Series:
-    """Somme sur les k segments précédents ('back') ou suivants ('front'),
-    segment courant exclu. Aux bords, on somme ce qui est disponible."""
+    """Sum over the `k` previous ('back') or next ('front') segments.
+
+    The current segment is excluded; at the edges, the available segments
+    are summed.
+    """
     if direction == "back":
         return s.transform(
             lambda values: values.shift(1).rolling(k, min_periods=1).sum().fillna(0.0)
@@ -119,7 +193,29 @@ def build_features(
     dataset: pd.DataFrame,
     windows_km: tuple = WINDOWS_KM,
 ) -> pd.DataFrame:
-    """Build features for the dataset."""
+    """Build the predictors of each segment.
+
+    Parameters
+    ----------
+    dataset : pandas.DataFrame
+        Segments with ``activity_id``, cumulative ``distance`` (metres) and
+        ``altitude`` (metres) columns. It is not modified.
+    windows_km : tuple of float, optional
+        Window lengths in km of the back / front elevation sums. Default is
+        ``WINDOWS_KM``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A copy of `dataset` with the elevation changes (per segment, done,
+        remaining, total and their ratios), the distance remaining and total,
+        the back / front window sums, the ``slope`` and the Minetti
+        ``walking_cost`` / ``running_cost`` relative to flat terrain.
+
+    See Also
+    --------
+    TrailPredictor.minetti.cost_of_running : Running energy cost.
+    """
     x = dataset.copy()
     x_grp = x.groupby("activity_id")
 

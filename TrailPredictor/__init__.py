@@ -1,3 +1,5 @@
+"""Trail running time prediction from Strava FIT activities."""
+
 from TrailPredictor.activities import RunningActivities
 from TrailPredictor.minetti import cost_of_running, cost_of_walking
 from TrailPredictor.utils import DATA_DIR, COMPUTED_DIR
