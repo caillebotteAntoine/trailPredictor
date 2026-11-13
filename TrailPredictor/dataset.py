@@ -1,6 +1,7 @@
 """Dataset of segmented running activities used to train the models."""
 
 from typing import cast
+from warnings import warn
 
 import numpy as np
 import pandas as pd
@@ -344,19 +345,24 @@ class Dataset:
             predicted_speed, index=self._data.index, name="predicted_speed"
         )
 
-    def predict_total_time(self, smearing: float = 1.0) -> pd.Series:
+    def predict_total_time(self, smearing=None) -> pd.Series:
         """Predict the total time of each activity.
 
         Parameters
         ----------
         smearing : float, optional
-            Multiplicative correction of each segment time. Default is 1.0.
+            Multiplicative correction of each segment time.
             With a log target, pass ``train_dataset.smearing_factor()``.
 
         Returns
         -------
         pandas.Series
             Predicted total time (Timedelta), indexed by ``activity_id``.
+
+        Raises
+        ------
+        ValueError
+            If the target is log and no smearing factor is passed.
 
         See Also
         --------
@@ -368,6 +374,19 @@ class Dataset:
         distance). With ``speed``, the sum of ``d / speed_pred`` is biased
         since E[1/v] != 1/E[v].
         """
+        if smearing is None and self._target_name in ("log_pace", "log_speed"):
+            raise ValueError(
+                "For a log target, please pass the smearing factor"
+                " computed on the training set."
+            )
+        smearing = 1.0 if smearing is None else float(smearing)
+
+        if smearing == self.smearing_factor():
+            warn(
+                "Warning: the smearing factor is the same as the training set."
+                " Use a different value for the test set."
+            )
+
         predicted_speed = self.predict_target_to_speed()
         segment_seconds = self._segment_width / predicted_speed * smearing
         return (
