@@ -15,9 +15,7 @@ _RUNNING_COEFFICIENTS = np.array((3.6, 19.5, 46.3, -43.3, -30.4, 155.4))
 _WALKING_COEFFICIENTS = np.array((2.5, 19.6, 51.9, -76.8, -58.7, 280.5))
 
 
-def _cost_of_locomotion(
-    decimal_grade: Numeric, coefficients: np.ndarray
-) -> Numeric:
+def _cost_of_locomotion(decimal_grade: Numeric, coefficients: np.ndarray) -> Numeric:
     """Evaluate a Minetti cost curve for one or more decimal grades."""
     grade = np.asarray(decimal_grade)
     clipped_grade = np.clip(grade, _MIN_GRADE, _MAX_GRADE)
@@ -105,4 +103,3 @@ def cost_of_walking(decimal_grade: Numeric) -> Numeric:
     2.5
     """
     return _cost_of_locomotion(decimal_grade, _WALKING_COEFFICIENTS)
-

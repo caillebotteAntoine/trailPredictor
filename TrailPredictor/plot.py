@@ -1,7 +1,7 @@
 """Plotly figures for the dataset, the activities and the Minetti curves."""
 
 from collections.abc import Callable
-from typing import Literal, TypeAlias
+from typing import Literal
 
 import numpy as np
 import pandas as pd

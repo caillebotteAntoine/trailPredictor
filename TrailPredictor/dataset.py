@@ -1,6 +1,6 @@
 """Dataset of segmented running activities used to train the models."""
 
-from typing import Literal, TypeAlias, cast
+from typing import cast
 
 import numpy as np
 import pandas as pd

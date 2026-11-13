@@ -31,7 +31,6 @@ from collections import defaultdict
 from pathlib import Path
 
 import fitdecode
-import numpy as np
 import pandas as pd
 
 SEMICIRCLE_TO_DEG = 180.0 / 2**31
