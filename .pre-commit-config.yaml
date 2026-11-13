@@ -49,13 +49,33 @@ repos:
         entry: poetry run python -m pylint
         language: system
         types: [python]
+        exclude: ^tests/
         args:
           [
             "-rn",
             "-sn",
             "--load-plugins=pylint.extensions.docparams",
+            "--default-docstring-type=numpy",
             "--accept-no-yields-doc=no",
             "--accept-no-return-doc=no",
             "--accept-no-raise-doc=no",
             "--accept-no-param-doc=no",
+          ]
+
+      # Same checks for tests, minus rules that clash with pytest:
+      # test functions need no docstring, fixtures are injected as
+      # same-named arguments, and fixtures need no Returns section.
+      - id: pylint
+        name: pylint (tests)
+        entry: poetry run python -m pylint
+        language: system
+        types: [python]
+        files: ^tests/
+        args:
+          [
+            "-rn",
+            "-sn",
+            "--load-plugins=pylint.extensions.docparams",
+            "--default-docstring-type=numpy",
+            "--disable=missing-function-docstring,redefined-outer-name,missing-return-doc",
           ]
