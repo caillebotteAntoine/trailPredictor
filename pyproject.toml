@@ -36,6 +36,8 @@ convention = "numpy"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D"]
+# Exploration notebooks may keep commented-out code.
+"*.ipynb" = ["ERA001"]
 
 [dependency-groups]
 dev = [
