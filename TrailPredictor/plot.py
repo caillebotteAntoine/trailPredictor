@@ -18,7 +18,7 @@ DropCategory = Literal["Uphill", "Downhill", "Flat"]
 CATEGORY_COLORS = {"Uphill": "#0072B2", "Downhill": "#D55E00", "Flat": "#777777"}
 
 HearthRateZoneLabel = Literal["Endurance", "Seuil", "Haut", "Hors zones"]
-HearthRateZone = {
+HEART_RATE_ZONES = {
     "Endurance": (120, 150),
     "Seuil": (150, 170),
     "Haut": (170, 210),
@@ -155,13 +155,13 @@ class PlotDataset(Dataset):
         _base_layout(merged, title=title)
         # put legend below the plots
         merged.update_layout(
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=-0.2,
-                xanchor="center",
-                x=0.5,
-            )
+            legend={
+                "orientation": "h",
+                "yanchor": "bottom",
+                "y": -0.2,
+                "xanchor": "center",
+                "x": 0.5,
+            }
         )
         return merged
 
@@ -261,7 +261,7 @@ class PlotDataset(Dataset):
                 mode="markers",
                 marker={"color": TARGETS_COLORS[self.target_name], "size": 5},
                 name=self.target_label,
-                hovertemplate=f"Prediction : %{{x:.2f}}<br>True value : %{{y:.2f}}<extra></extra>",
+                hovertemplate="Prediction : %{x:.2f}<br>True value : %{y:.2f}<extra></extra>",
             ),
             row=1,
             col=1,
@@ -287,7 +287,7 @@ class PlotDataset(Dataset):
                 mode="markers",
                 marker={"color": TARGETS_COLORS[self.target_name], "size": 5},
                 name="Residuals",
-                hovertemplate=f"Prediction : %{{x:.2f}}<br>Residual : %{{y:.2f}}<extra></extra>",
+                hovertemplate="Prediction : %{x:.2f}<br>Residual : %{y:.2f}<extra></extra>",
             ),
             row=1,
             col=2,
@@ -359,9 +359,9 @@ class PlotActivities(RunningActivities):
         self._data["heart_rate_zone"] = np.select(
             [
                 self._data["heart_rate"].between(z[0], z[1], inclusive="left")
-                for z in HearthRateZone.values()
+                for z in HEART_RATE_ZONES.values()
             ],
-            list(HearthRateZone.keys()),
+            list(HEART_RATE_ZONES.keys()),
             default="Hors zones",
         )
 
@@ -395,7 +395,7 @@ class PlotActivities(RunningActivities):
 
         for category in DropCategory.__args__:
             indexes = np.flatnonzero(self._data["drop_category"] == category)
-            if not len(indexes):
+            if indexes.size == 0:
                 continue
 
             for segment in np.split(indexes, np.where(np.diff(indexes) != 1)[0] + 1):
@@ -425,7 +425,7 @@ class PlotActivities(RunningActivities):
         """
         for zone in HearthRateZoneLabel.__args__:
             indexes = np.flatnonzero(self._data["heart_rate_zone"] == zone)
-            if not len(indexes):
+            if indexes.size == 0:
                 continue
 
             for segment in np.split(indexes, np.where(np.diff(indexes) != 1)[0] + 1):
@@ -456,7 +456,7 @@ class PlotActivities(RunningActivities):
             "Downhill": True,
             "Flat": True,
         }
-        for i, (category, _, segment) in enumerate(self.iter_drop_categories):
+        for category, _, segment in self.iter_drop_categories:
             fig.add_trace(
                 go.Scatter(
                     x=segment["distance"] / 1000,
@@ -485,7 +485,7 @@ class PlotActivities(RunningActivities):
     # =================================================================================== #
     #                                   GPS TRACK PLOT
     # =================================================================================== #
-    def track_map(
+    def track_map(  # pylint: disable=too-many-locals
         self,
         color_by: Literal["altitude", "heart_rate", "pace"] = "altitude",
         show_km_markers: bool = True,
@@ -531,12 +531,12 @@ class PlotActivities(RunningActivities):
         cmin, cmax = finite.quantile([0.05, 0.95]) if not finite.empty else (0, 1)
         colorscale = "RdYlGn_r" if color_by == "pace" else "Viridis"
         map_trace = go.Scattermap if hasattr(go, "Scattermap") else go.Scattermapbox
-        trace = dict(
-            lat=latitude,
-            lon=longitude,
-            mode="lines+markers",
-            line={"color": "#666666", "width": 2},
-            marker={
+        trace = {
+            "lat": latitude,
+            "lon": longitude,
+            "mode": "lines+markers",
+            "line": {"color": "#666666", "width": 2},
+            "marker": {
                 "color": values,
                 "colorscale": colorscale,
                 "cmin": cmin,
@@ -544,13 +544,13 @@ class PlotActivities(RunningActivities):
                 "size": 5,
                 "colorbar": {"title": label},
             },
-            customdata=np.column_stack((distance, values)),
-            hovertemplate=(
+            "customdata": np.column_stack((distance, values)),
+            "hovertemplate": (
                 "Distance : %{customdata[0]:.0f} m<br>"
                 f"{label} : %{{customdata[1]:.2f}}<extra></extra>"
             ),
-            name="Parcours",
-        )
+            "name": "Parcours",
+        }
         if latitude.notna().sum() < 2 or longitude.notna().sum() < 2:
             raise ValueError("L'activité ne contient pas de coordonnées GPS valides.")
         fig = _base_layout(go.Figure(map_trace(**trace)), "Parcours GPS")
@@ -879,7 +879,10 @@ class PlotActivities(RunningActivities):
                 mode="lines",
                 name="Predicted target",
                 line={"color": "#8256E9"},
-                hovertemplate="Distance : %{x:.2f} km<br>Predicted target : %{y:.1f} m/s<extra></extra>",
+                hovertemplate=(
+                    "Distance : %{x:.2f} km<br>"
+                    "Predicted target : %{y:.1f} m/s<extra></extra>"
+                ),
             ),
             row=1,
             col=1,
