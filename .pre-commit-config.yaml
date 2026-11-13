@@ -18,6 +18,11 @@ repos:
             "--fix",
             "--exit-non-zero-on-fix",
           ]
+      # Docstrings: NumPy convention set in [tool.ruff.lint.pydocstyle]
+      # of pyproject.toml (tests are excluded there).
+      - id: ruff
+        name: ruff (docstrings)
+        args: ["--select=D"]
       - id: ruff-format
 
   - repo: https://github.com/osprey-oss/deptry.git
