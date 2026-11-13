@@ -8,8 +8,6 @@ import numpy as np
 import pandas as pd
 
 
-SourceUnit = Literal["speed", "pace", "accel_pace", "accel_speed"]
-
 Target = Literal[
     "pace",
     "log_pace",

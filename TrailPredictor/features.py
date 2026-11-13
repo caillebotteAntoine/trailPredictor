@@ -181,13 +181,6 @@ def _window_sum(s: pd.Series, k: int, direction: str = "front") -> pd.Series:
     )
 
 
-def _cumsum(s: pd.Series, direction: str = "forward") -> pd.Series:
-    """Cumulative sum of a series, either forward or backward."""
-    if direction == "forward":
-        return s.cumsum()
-    return s.transform(lambda values: values.iloc[::-1].cumsum().iloc[::-1])
-
-
 def build_features(
     dataset: pd.DataFrame,
     windows_km: tuple = WINDOWS_KM,

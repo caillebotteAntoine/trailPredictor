@@ -10,6 +10,7 @@ notebooks stop using it.
 
 import plotly.graph_objects as go
 
+from TrailPredictor import modeling
 from TrailPredictor.dataset import Dataset
 from TrailPredictor.plot import PlotActivities, PlotDataset, plot_minetti_curve
 
@@ -22,6 +23,10 @@ Dataset.get_activities
 PlotDataset.vs_prediction
 PlotActivities.error_prediction
 plot_minetti_curve
+
+# --- Future use in the notebooks
+modeling.make_models
+PlotActivities.iter_heart_rate_zones
 
 # --- False positives
 # Attribute of a plotly trace, set in PlotDataset.merge_figure.

@@ -37,13 +37,6 @@ def _base_layout(fig: go.Figure, title: str) -> go.Figure:
     return fig
 
 
-def _rgba(hex_color: str, alpha: float) -> str:
-    """Convert a hexadecimal color to an rgba CSS color."""
-    color = hex_color.lstrip("#")
-    red, green, blue = (int(color[i : i + 2], 16) for i in (0, 2, 4))
-    return f"rgba({red}, {green}, {blue}, {alpha})"
-
-
 def _pace_text(pace: float) -> str:
     return format_pace(pace).replace(" min/km", "/km").replace("--:--/km", "—")
 
