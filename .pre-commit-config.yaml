@@ -50,7 +50,8 @@ repos:
         entry: poetry run python -m pylint
         language: system
         types: [python]
-        exclude: ^tests/
+        # regpath.py is an exploration script, not part of the package.
+        exclude: ^(tests/|regpath\.py$)
         args:
           [
             "-rn",
