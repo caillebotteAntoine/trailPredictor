@@ -184,7 +184,8 @@ class RunningActivities:
                     "altitude": "mean",
                     "position_lat": "mean",
                     "position_long": "mean",
-                    # TODO : sum of altitude drop for each segment
+                    "drop_pos": lambda x: x[x > 0].sum(),
+                    "drop_neg": lambda x: x[x < 0].sum(),
                 }
             )
             .reset_index(drop=False)
