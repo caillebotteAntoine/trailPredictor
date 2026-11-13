@@ -1,5 +1,8 @@
 """Trail running time prediction from Strava FIT activities."""
 
+# The package keeps its historical PascalCase name used by every import.
+# pylint: disable=invalid-name
+
 from TrailPredictor.activities import RunningActivities
 from TrailPredictor.minetti import cost_of_running, cost_of_walking
 from TrailPredictor.utils import DATA_DIR, COMPUTED_DIR
