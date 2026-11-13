@@ -102,7 +102,11 @@ class RunningActivities:
         PlotActivities
             Plotting interface built from a copy of the activity.
         """
-        from TrailPredictor.plot import PlotActivities
+        # Lazy import: TrailPredictor.plot subclasses RunningActivities
+        # (circular import).
+        from TrailPredictor.plot import (  # pylint: disable=import-outside-toplevel
+            PlotActivities,
+        )
 
         return PlotActivities(self)
 
