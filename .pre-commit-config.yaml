@@ -30,7 +30,7 @@ repos:
     hooks:
       - id: deptry
         entry: poetry run deptry .
-        args: ["--per-rule-ignores=DEP002=jax|numpyro|netcdf4"]
+        args: ["--per-rule-ignores=DEP002=jax|numpyro|netcdf4|nbformat"]
 
   - repo: local
     hooks:
