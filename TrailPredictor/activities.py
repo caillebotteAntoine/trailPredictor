@@ -181,9 +181,6 @@ class RunningActivities:
                     "position_lat": "mean",
                     "position_long": "mean",
                     # TODO : sum of altitude drop for each segment
-                    # "altitude_drop": "sum",
-                    # "altitude_drop_pos": "sum",
-                    # "altitude_drop_neg": "sum",
                 }
             )
             .reset_index(drop=False)
@@ -317,16 +314,7 @@ class RunningActivities:
         # convert columns to appropriate types
         x["timestamp"] = pd.to_datetime(x["timestamp"])
         x["elapsed_time"] = pd.to_timedelta(x["elapsed_time"])
-        if "speed" in x.columns:
-            x = add_speed_columns(x)
-        else:
-            parts = (
-                x["pace"]
-                .astype("string")
-                .str.extract(r"^\s*(\d+):(\d+(?:\.\d+)?)", expand=True)
-            )
-            pace = parts[0].astype("float64") + parts[1].astype("float64") / 60.0
-            x = add_speed_columns(x)
+        x = add_speed_columns(x)
         activity = cls(x)
 
         if progress_cb:

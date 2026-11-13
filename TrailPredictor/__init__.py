@@ -4,6 +4,14 @@ from TrailPredictor.activities import RunningActivities
 from TrailPredictor.minetti import cost_of_running, cost_of_walking
 from TrailPredictor.utils import DATA_DIR, COMPUTED_DIR
 
+__all__ = [
+    "COMPUTED_DIR",
+    "DATA_DIR",
+    "RunningActivities",
+    "cost_of_running",
+    "cost_of_walking",
+]
+
 DELETE_COMPUTED = False
 
 if DELETE_COMPUTED:

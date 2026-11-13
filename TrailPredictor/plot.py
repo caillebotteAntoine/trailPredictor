@@ -629,7 +629,6 @@ class PlotActivities(RunningActivities):
         pace[pace > 20] = np.nan
         average = pace.mean()
 
-        # durations = data["elapsed_time"].dt.total_seconds()
         difference = (pace - average) * 60
         # Compress extreme differences while preserving whether the segment is
         # faster or slower than the average.
