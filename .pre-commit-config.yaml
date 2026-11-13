@@ -1,0 +1,56 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.2.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      # Code mort "local" : imports / variables inutilisés, redéfinitions,
+      # code commenté. Doit passer AVANT le formatage (recommandation ruff).
+      - id: ruff
+        name: ruff (dead code)
+        args:
+          [
+            "--select=F401,F811,F841,ERA001",
+            "--fix",
+            "--exit-non-zero-on-fix",
+          ]
+      - id: ruff-format
+
+  - repo: https://github.com/osprey-oss/deptry.git
+    rev: 0.25.0
+    hooks:
+      - id: deptry
+        entry: poetry run deptry .
+        args: ["--per-rule-ignores=DEP002=jax|numpyro|netcdf4"]
+
+  - repo: local
+    hooks:
+      # Code mort "global" : fonctions, classes, méthodes, attributs
+      # jamais référencés dans l'ensemble du projet.
+      - id: vulture
+        name: vulture (dead code)
+        entry: poetry run vulture
+        language: system
+        types: [python]
+        pass_filenames: false   # analyse tout le projet, pas seulement les fichiers stagés
+        require_serial: true
+
+      - id: pylint
+        name: pylint
+        entry: poetry run python -m pylint
+        language: system
+        types: [python]
+        args:
+          [
+            "-rn",
+            "-sn",
+            "--load-plugins=pylint.extensions.docparams",
+            "--accept-no-yields-doc=no",
+            "--accept-no-return-doc=no",
+            "--accept-no-raise-doc=no",
+            "--accept-no-param-doc=no",
+          ]
