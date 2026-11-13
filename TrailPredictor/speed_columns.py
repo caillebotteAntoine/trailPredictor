@@ -8,45 +8,66 @@ import numpy as np
 import pandas as pd
 
 
-SourceUnit = Literal["speed", "pace", "km_per_h"]
-SPEED_COLUMNS = ("speed", "pace", "log_speed", "log_pace")
+SourceUnit = Literal["speed", "pace", "accel_pace", "accel_speed"]
+
+Target = Literal[
+    "pace",
+    "log_pace",
+    "speed",
+    "log_speed",
+    "accel_pace",
+    "log_accel_pace",
+    "accel_speed",
+    "log_accel_speed",
+]
+
+TARGETS: tuple[Target, ...] = (
+    "pace",
+    "log_pace",
+    "speed",
+    "log_speed",
+    "accel_pace",
+    "log_accel_pace",
+    "accel_speed",
+    "log_accel_speed",
+)
+
 _PACE_FACTOR = 1000.0 / 60.0
 
 
-def add_speed_columns(
-    df: pd.DataFrame,
-    from_col: str,
-    unit: SourceUnit,
-) -> pd.DataFrame:
+def add_speed_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Return a copy with numeric speed, pace, and logarithmic columns.
 
-    ``speed`` is expressed in m/s and ``pace`` in min/km. Missing values are
-    propagated. Zero speed produces infinite pace and logarithms. Non-positive
-    source pace and negative source speeds are represented as missing values.
+    ``speed`` is expressed in m/s
+    ``pace`` in min/km
+    ``accel_speed`` in m/s²
+    ``accel_pace`` in min/km²
+
+    Missing values are propagated. Zero speed produces infinite pace and
+    logarithms. Non-positive source pace and negative source speeds are
+    represented as missing values.
     """
-    if unit not in ("speed", "pace", "km_per_h"):
-        raise ValueError("unit must be 'speed', 'pace', or 'km_per_h'")
-    if from_col not in df.columns:
-        raise KeyError(f"Source column {from_col!r} not found")
+    if "speed" not in df.columns:
+        raise ValueError(
+            f"DataFrame must contain a 'speed' column, got {list(df.columns)}"
+        )
 
     result = df.copy()
-    source = pd.to_numeric(result[from_col], errors="coerce").astype("float64")
-    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-        if unit == "speed":
-            speed = source.where(source >= 0)
-        elif unit == "km_per_h":
-            speed = (source / 3.6).where(source >= 0)
-        else:
-            speed = (_PACE_FACTOR / source).where(source > 0)
 
-        pace = _PACE_FACTOR / speed
-        log_speed = np.log(speed)
-        log_pace = np.log(pace)
+    speed = result["speed"].to_numpy(dtype="float64", copy=False)
+    pace = _PACE_FACTOR / speed
+    accel_speed = result["speed"].diff().to_numpy(dtype="float64", copy=False)
+    accel_pace = _PACE_FACTOR * accel_speed / speed**2
 
     result["speed"] = speed.astype("float64")
     result["pace"] = pace.astype("float64")
-    result["log_speed"] = log_speed.astype("float64")
-    result["log_pace"] = log_pace.astype("float64")
+    result["accel_speed"] = accel_speed.astype("float64")
+    result["accel_pace"] = accel_pace.astype("float64")
+
+    for col in ["speed", "pace", "accel_speed", "accel_pace"]:
+        result[col] = result[col].replace([np.nan], 0.0)
+        result[f"log_{col}"] = np.log(result[col]).astype("float64")
+
     return result
 
 

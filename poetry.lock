@@ -879,6 +879,22 @@ files = [
 devel = ["colorama", "json-spec", "jsonschema", "pylint", "pytest", "pytest-benchmark", "pytest-cache", "validictory"]
 
 [[package]]
+name = "fit-tool"
+version = "0.9.17"
+description = "A library for reading and writing Garmin FIT files."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "fit_tool-0.9.17-py3-none-any.whl", hash = "sha256:c42f48dc9196ee76b63b869f398162ef5115fd0747c4e8cde177763d16338c9f"},
+    {file = "fit_tool-0.9.17.tar.gz", hash = "sha256:35a7d92c7b735c047ecfe189d222427076efd8935fb4465a5f1062a4bf16ecf4"},
+]
+
+[package.extras]
+gen = ["inflection (>=0.5.1)", "jinja2 (>=3.0)", "openpyxl (>=2.5.12)"]
+test = ["pytest (>=7.0)", "pytest-cov (>=4.0)"]
+
+[[package]]
 name = "fitdecode"
 version = "0.11.0"
 description = "FIT file parser and decoder"
@@ -892,6 +908,17 @@ files = [
 
 [package.extras]
 dev = ["build", "check_manifest (>=0.48)", "dlint", "flake8", "flake8-bugbear", "flake8-import-order", "flake8-noqa", "flake8-pyproject", "flake8-ruff", "mccabe", "openpyxl", "pycodestyle", "pyflakes", "pytest", "readme_renderer (>=33.0)", "setuptools (>=61.0.0)", "sphinx", "sphinx_rtd_theme", "twine"]
+
+[[package]]
+name = "fitparse"
+version = "1.2.0"
+description = "Python library to parse ANT/Garmin .FIT files"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "fitparse-1.2.0.tar.gz", hash = "sha256:2d691022452dea6dabad13cc6e017ca467fe8a3a895cd3ac67a50a7bb716b4a9"},
+]
 
 [[package]]
 name = "fonttools"
@@ -973,6 +1000,18 @@ symfont = ["sympy"]
 type1 = ["xattr ; sys_platform == \"darwin\""]
 unicode = ["unicodedata2 (>=18.0.0) ; python_version <= \"3.15\""]
 woff = ["brotli (>=1.0.1) ; platform_python_implementation == \"CPython\"", "brotlicffi (>=0.8.0) ; platform_python_implementation != \"CPython\"", "zopfli (>=0.1.4)"]
+
+[[package]]
+name = "gpxpy"
+version = "1.6.2"
+description = "GPX file parser and GPS track manipulation library"
+optional = false
+python-versions = ">=3.6"
+groups = ["main"]
+files = [
+    {file = "gpxpy-1.6.2-py3-none-any.whl", hash = "sha256:289bc2d80f116c988d0a1e763fda22838f83005573ece2bbc6521817b26fb40a"},
+    {file = "gpxpy-1.6.2.tar.gz", hash = "sha256:a72c484b97ec42b80834353b029cc8ee1b79f0ffca1179b2210bb3baf26c01ae"},
+]
 
 [[package]]
 name = "h11"
@@ -3781,4 +3820,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "33664fe36f9431e8ac188c25e0d3d744ac7fee681af5fab599f9cd6ca99188e8"
+content-hash = "ad97e5c6e37b1a88e3e036eed102958e2336dd0c54abea107ce2b41290484d3c"

@@ -8,6 +8,7 @@ from TrailPredictor.loading import load_activities
 from TrailPredictor.minetti import cost_of_walking, cost_of_running
 
 WINDOWS_KM = (1, 3, 5, 10)
+FEATURES_SUFFIXES = ("done", "remaining")
 
 
 def export_activities(
@@ -115,11 +116,14 @@ def _cumsum(s: pd.Series, direction: str = "forward") -> pd.Series:
 
 
 def build_features(
-    dataset: pd.DataFrame, windows_km: tuple = WINDOWS_KM
+    dataset: pd.DataFrame,
+    windows_km: tuple = WINDOWS_KM,
 ) -> pd.DataFrame:
     """Build features for the dataset."""
     x = dataset.copy()
     x_grp = x.groupby("activity_id")
+
+    segment_width = x["distance"].diff().median()  # segment width in meters
 
     # => difference in altitude between two consecutive points
     x["altitude_drop"] = x_grp["altitude"].diff().fillna(0)
@@ -127,39 +131,50 @@ def build_features(
     x["altitude_drop_neg"] = x["altitude_drop"].clip(upper=0)
     # cumulative of each variable for "done" and "remaining" features
     x_grp = x.groupby("activity_id")
-    col_features = ("altitude_drop_pos", "altitude_drop_neg", "distance")
+    col_features = ("altitude_drop_pos", "altitude_drop_neg")
     for feature in col_features:
-        x[f"{feature}_done"] = _cumsum(x_grp[feature], direction="forward")
-        x[f"{feature}_remaining"] = _cumsum(x_grp[feature], direction="backward")
-        x = x.merge(
-            x.groupby("activity_id")[feature]
-            .sum()
-            .reset_index()
-            .rename(columns={feature: f"{feature}_total"})
-        )
+        x[f"{feature}_done"] = x_grp[feature].cumsum()
+        x[f"{feature}_total"] = x_grp[feature].transform("sum")
+        x[f"{feature}_remaining"] = x[f"{feature}_total"] - x[f"{feature}_done"]
+
+    # special case for distance, which is already cumulative
+    x["distance_done"] = x["distance"]
+    x["distance_remaining"] = x_grp["distance"].transform(
+        lambda values: values.max() - values
+    )
+    x = x.merge(
+        x.groupby("activity_id")["distance"]
+        .max()
+        .reset_index()
+        .rename(columns={"distance": "distance_total"})
+    )
 
     # => ratio of each variable for "done" and "remaining" features
     # in order to remove the effect of the total value of each variable for each activity
     for feature in col_features:
-        for suffix in ("done", "remaining"):
+        for suffix in FEATURES_SUFFIXES:
             col = f"{feature}_{suffix}"
             x[f"{col}_ratio"] = x[col] / x[f"{feature}_total"]
 
     # => sum of each variable for the previous and next k segments
     x_grp = x.groupby("activity_id")
-    segment_width = dataset["segment"].diff().max()
     for feature in col_features:
-        for k in [int(w * 1000 / segment_width) for w in WINDOWS_KM]:
-            x[f"{feature}_back_{k}"] = _window_sum(x_grp[feature], k, direction="back")
-            x[f"{feature}_front_{k}"] = _window_sum(
+        for w in windows_km:
+            k = int(round(w * 1000 / segment_width))
+            x[f"{feature}_back_{w}km"] = _window_sum(
+                x_grp[feature], k, direction="back"
+            )
+            x[f"{feature}_front_{w}km"] = _window_sum(
                 x_grp[feature], k, direction="front"
             )
 
     # => Minetti energy cost for running and walking
-    x["slope"] = x["altitude_drop"] / x["distance"]
+    x["slope"] = x["altitude_drop"] / segment_width
     x["walking_cost"] = cost_of_walking(x["slope"]) / cost_of_walking(0)
     x["running_cost"] = cost_of_running(x["slope"]) / cost_of_running(0)
 
     # TODO : ravito
 
+    # removing done because it is redundant with distance
+    x.drop(columns="distance_done", inplace=True)
     return x

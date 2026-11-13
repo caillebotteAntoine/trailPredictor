@@ -20,7 +20,20 @@ class RunningActivities:
     def __init__(self, data: pd.DataFrame, prediction: pd.Series | None = None):
         self._data = data
         self._segment_width = data["distance"].diff().max()
+
         self._prediction = prediction
+        self._target_name: str | None = None
+        if prediction is not None:
+            if prediction.name is None:
+                raise ValueError("Prediction series must have a name.")
+            # remove suffix _pred
+            self._target_name = str(prediction.name).removesuffix("_pred")
+
+    @property
+    def target_name(self) -> str:
+        if self._target_name is None:
+            raise ValueError("No prediction available, target is None.")
+        return self._target_name
 
     @property
     def data(self) -> pd.DataFrame:
@@ -28,18 +41,32 @@ class RunningActivities:
         return self._data.copy()
 
     @property
-    def prediction(self) -> pd.Series | None:
+    def segment_width(self) -> int:
+        """Return the segment width in meters."""
+        return self._segment_width
+
+    @property
+    def prediction(self) -> pd.Series:
         """Return a copy of the prediction series."""
-        return self._prediction.copy() if self._prediction is not None else None
+        if self._prediction is None:
+            raise ValueError("No prediction available, prediction is None.")
+        return self._prediction.copy()
+
+    @property
+    def target(self) -> pd.Series:
+        """Return the target value."""
+        return self._data[self.target_name].copy()
 
     @property
     def plot(self):
+        """Return a PlotActivities object for plotting the activity."""
         from TrailPredictor.plot import PlotActivities
 
         return PlotActivities(self)
 
     @property
     def distance_km(self) -> pd.Series:
+        """Return the distance in kilometers."""
         return self._data["distance"] / 1000
 
     # ==================================================================================== #
@@ -47,12 +74,17 @@ class RunningActivities:
     # ==================================================================================== #
     @classmethod
     def from_fit_record(cls, record: pd.DataFrame, segment_width: int = 100):
+        """Create an activity from a FIT record DataFrame."""
         x = record.copy()
 
         # fill missing values
         # ffill : propagating the last valid observation to next valid.
         # bfill : using the next valid observation to fill the gap.
         x = x.ffill().bfill()
+
+        if "altitude" not in x.columns and "enhanced_altitude" in x.columns:
+            warn("altitude column not found, using enhanced_altitude")
+            x["altitude"] = x["enhanced_altitude"]
 
         if (x["enhanced_altitude"] == x["altitude"]).all():
             x.drop(columns=["enhanced_altitude"], inplace=True)
@@ -62,11 +94,10 @@ class RunningActivities:
                 columns={"enhanced_altitude": "altitude"}
             )
 
-        # if (x["enhanced_speed"] == x["speed"]).all():
-        #     x.drop(columns=["enhanced_speed"], inplace=True)
-        # else:
-        #     warn("enhanced_speed is not equal to speed, using enhanced_speed")
-        #     x = x.drop(columns=["speed"]).rename(columns={"enhanced_speed": "speed"})
+        # mandatory columns for the activity
+        for col in ["heart_rate"]:
+            if col not in x.columns:
+                x[col] = pd.NA
 
         # aggregate by segments of segment_width meters
         last_timestamp = x["timestamp"].max()
@@ -108,7 +139,7 @@ class RunningActivities:
         x["speed"] = (segment_width / x["elapsed_time"].dt.total_seconds()).astype(
             "float64"
         )
-        x = add_speed_columns(x, from_col="speed", unit="speed")
+        x = add_speed_columns(x)
 
         return cls(x)
 
@@ -185,7 +216,7 @@ class RunningActivities:
         x["timestamp"] = pd.to_datetime(x["timestamp"])
         x["elapsed_time"] = pd.to_timedelta(x["elapsed_time"])
         if "speed" in x.columns:
-            x = add_speed_columns(x, from_col="speed", unit="speed")
+            x = add_speed_columns(x)
         else:
             parts = (
                 x["pace"]
@@ -193,7 +224,7 @@ class RunningActivities:
                 .str.extract(r"^\s*(\d+):(\d+(?:\.\d+)?)", expand=True)
             )
             pace = parts[0].astype("float64") + parts[1].astype("float64") / 60.0
-            x = add_speed_columns(x.assign(pace=pace), from_col="pace", unit="pace")
+            x = add_speed_columns(x)
         activity = cls(x)
 
         if progress_cb:

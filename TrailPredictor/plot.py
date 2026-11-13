@@ -1,15 +1,14 @@
-from typing import Literal, TypeAlias
-
 from collections.abc import Callable
+from typing import Literal, TypeAlias
 
 import numpy as np
 import pandas as pd
-
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from TrailPredictor.activities import RunningActivities
-from TrailPredictor.dataset import Dataset, Target, TARGETS
+from TrailPredictor.speed_columns import TARGETS
+from TrailPredictor.dataset import Dataset
 from TrailPredictor.minetti import cost_of_running, cost_of_walking
 from TrailPredictor.speed_columns import format_pace
 
@@ -57,50 +56,64 @@ def _pace_ticks(values: pd.Series) -> tuple[list[float], list[str]]:
     return ticks.tolist(), [_pace_text(value) for value in ticks]
 
 
-TAGETS_UNITS = {
+TARGETS_UNITS = {
     "pace": "min/km",
     "log_pace": "log(min/km)",
-    "speed": "km/h",
-    "log_speed": "log(km/h)",
+    "speed": "m/s",
+    "log_speed": "log(m/s)",
+    "accel_pace": "min/km²",
+    "log_accel_pace": "log(min/km²)",
+    "accel_speed": "m/s²",
+    "log_accel_speed": "log(m/s²)",
 }
 TARGETS_COLORS = {
     "pace": "#56B4E9",
     "log_pace": "#E95656",
     "speed": "#5BE956",
     "log_speed": "#E456E9",
+    "accel_pace": "#E9E956",
+    "log_accel_pace": "#56E9E9",
+    "accel_speed": "#E9A956",
+    "log_accel_speed": "#A956E9",
 }
 
 
 class PlotDataset(Dataset):
     def __init__(self, dataset: Dataset):
-        super().__init__(dataset._data, target=dataset._target)
+        super().__init__(dataset._data, target=dataset.target_name)
 
     @property
     def target_label(self) -> str:
-        return f"{self._target} ({TAGETS_UNITS[self._target]})"
+        """Return the target name with its unit."""
+        return f"{self.target_name} ({TARGETS_UNITS[self.target_name]})"
+
+    @property
+    def target_unit(self) -> str:
+        """Return the unit of the target."""
+        return TARGETS_UNITS[self.target_name]
 
     def merge_figure(
         self, plot_fct: Callable[[], go.Figure], title: str, **kwargs
     ) -> go.Figure:
         """Merge a figure with the target histogram."""
         merged = make_subplots(
-            rows=2,
-            cols=2,
+            rows=3,
+            cols=3,
             subplot_titles=TARGETS,
             vertical_spacing=0.15,
         )
-        current_target = self._target
+        current_target_name = self.target_name
         figs = {}
         try:
             for col in TARGETS:
-                self.change_target(col)
+                self.target = col
                 figs[col] = plot_fct(**kwargs)
         finally:
-            self.change_target(current_target)
+            self.target = current_target_name
 
         for i, fig in enumerate(figs.values(), start=1):
-            row = (i - 1) // 2 + 1
-            col = (i - 1) % 2 + 1
+            row = (i - 1) // 3 + 1
+            col = (i - 1) % 3 + 1
             x_title = fig.layout.xaxis.title.text
             y_title = fig.layout.yaxis.title.text
             merged.update_xaxes(title_text=x_title, row=row, col=col)
@@ -122,21 +135,27 @@ class PlotDataset(Dataset):
         )
         return merged
 
+    # ================================================================================= #
+    #                             TARGET HISTOGRAM PLOT
+    # ================================================================================= #
     def target_histogram(self) -> go.Figure:
         """Display a histogram of the target variable."""
-        fig = _base_layout(go.Figure(), f"Histogram of {self._target}")
+        fig = _base_layout(go.Figure(), f"Histogram of {self.target_name}")
         fig.add_trace(
             go.Histogram(
                 x=self.target,
                 nbinsx=50,
-                marker={"color": TARGETS_COLORS[self._target]},
+                marker={"color": TARGETS_COLORS[self.target_name]},
                 name=self.target_label,
             )
         )
-        fig.update_xaxes(title=self._target)
+        fig.update_xaxes(title=self.target_name)
         fig.update_yaxes(title="Count")
         return fig
 
+    # ================================================================================= #
+    #                             TARGET VS FEATURE PLOT
+    # ================================================================================= #
     def target_vs_feat(self, features="altitude_drop") -> go.Figure:
         """Display a scatter plot of the target variable vs altitude drop."""
         if features not in self._data.columns:
@@ -146,18 +165,83 @@ class PlotDataset(Dataset):
             raise ValueError(f"Feature '{features}' must be numeric")
         if values.dropna().empty:
             raise ValueError(f"Feature '{features}' contains no numeric values")
-        fig = _base_layout(go.Figure(), f"{self._target} vs {features} per segment")
+        fig = _base_layout(go.Figure(), f"{self.target_name} vs {features} per segment")
         fig.add_trace(
             go.Scatter(
                 x=values,
                 y=self.target,
                 mode="markers",
-                marker={"color": TARGETS_COLORS[self._target], "size": 5},
+                marker={"color": TARGETS_COLORS[self.target_name], "size": 5},
                 name=self.target_label,
             )
         )
         fig.update_xaxes(title=features)
         fig.update_yaxes(title=self.target_label)
+        return fig
+
+    # ================================================================================= #
+    #                                 VS PREDICTION PLOT
+    # ================================================================================= #
+    def vs_prediction(self) -> go.Figure:
+        """Display a scatter plot of the target variable vs the predicted values on
+        one column and the residuals on the other column."""
+
+        fig = _base_layout(
+            make_subplots(
+                rows=1, cols=2, subplot_titles=["Target vs Prediction", "Residuals"]
+            ),
+            "Prediction vs True Values",
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=self.target,
+                y=self.prediction,
+                mode="markers",
+                marker={"color": TARGETS_COLORS[self.target_name], "size": 5},
+                name=self.target_label,
+                hovertemplate=f"Prediction : %{{x:.2f}}<br>True value : %{{y:.2f}}<extra></extra>",
+            ),
+            row=1,
+            col=1,
+        )
+        # add unity line
+        fig.add_trace(
+            go.Line(
+                x=[self.prediction.min(), self.prediction.max()],
+                y=[self.prediction.min(), self.prediction.max()],
+                mode="lines",
+                line={"color": "#000000", "dash": "dash"},
+                name="Unity line",
+                hoverinfo="skip",
+            ),
+            row=1,
+            col=1,
+        )
+        residuals = self.target - self.prediction
+        fig.add_trace(
+            go.Scatter(
+                x=self.prediction,
+                y=residuals,
+                mode="markers",
+                marker={"color": TARGETS_COLORS[self.target_name], "size": 5},
+                name="Residuals",
+                hovertemplate=f"Prediction : %{{x:.2f}}<br>Residual : %{{y:.2f}}<extra></extra>",
+            ),
+            row=1,
+            col=2,
+        )
+        fig.update_xaxes(
+            title=f"True value ({TARGETS_UNITS[self.target_name]})", row=1, col=1
+        )
+        fig.update_yaxes(
+            title=f"Prediction ({TARGETS_UNITS[self.target_name]})", row=1, col=1
+        )
+        fig.update_xaxes(
+            title=f"Prediction ({TARGETS_UNITS[self.target_name]})", row=1, col=2
+        )
+        fig.update_yaxes(
+            title=f"Residual ({TARGETS_UNITS[self.target_name]})", row=1, col=2
+        )
         return fig
 
 
@@ -176,10 +260,9 @@ class PlotActivities(RunningActivities):
                 "position_long",
                 "distance",
                 "altitude",
-                "speed",
-                "pace",
                 "heart_rate",
             ]
+            + list(TARGETS)
         ]
 
         self._data["altitude_drop"] = self._data["altitude"].diff()
@@ -201,6 +284,15 @@ class PlotActivities(RunningActivities):
             list(HearthRateZone.keys()),
             default="Hors zones",
         )
+
+    @property
+    def target_label(self) -> str:
+        return f"{self.target_name} ({TARGETS_UNITS[self.target_name]})"
+
+    @property
+    def target_unit(self) -> str:
+        """Return the unit of the target."""
+        return TARGETS_UNITS[self.target_name]
 
     @property
     def iter_drop_categories(self):
@@ -503,23 +595,38 @@ class PlotActivities(RunningActivities):
             "Vitesse et altitude",
         )
 
-        customdata = data[["speed"]].copy()
+        customdata = self.target.to_numpy().reshape(-1, 1)
 
         hovertemplate = (
             "Distance : %{x:.2f} km<br>"
             "Altitude : %{y:.1f} m<br>"
-            "Speed : %{customdata[0]:.1f} m/s<extra></extra>"
+            f"Target : %{{customdata[0]:.1f}} {self.target_unit}"
+            "<extra></extra>"
         )
-        if self.prediction is not None:
-            customdata["prediction"] = self.prediction
-            customdata["error"] = np.abs(self.prediction - data["speed"])
-            hovertemplate = (
-                "Distance : %{x:.2f} km<br>"
-                "Altitude : %{y:.1f} m<br>"
-                "Speed : %{customdata[0]:.1f} m/s"
-                "<br>Prediction : %{customdata[1]:.1f} m/s"
-                "<br>Erreur : %{customdata[2]:.1f} m/s<extra></extra>"
-            )
+
+        # try to use prediction or catch ValueError("No prediction available, prediction is None.")
+        try:
+            if self.prediction is not None:
+                customdata = np.column_stack(
+                    [
+                        self.target.to_numpy(),
+                        self.prediction,
+                        np.abs(self.prediction - self.target.to_numpy()),
+                    ]
+                )
+
+                hovertemplate = (
+                    "Distance : %{x:.2f} km<br>"
+                    "Altitude : %{y:.1f} m<br>"
+                    f"Target : %{{customdata[0]:.1f}} {self.target_unit}<br>"
+                    f"Prediction : %{{customdata[1]:.1f}} {self.target_unit}<br>"
+                    f"Erreur : %{{customdata[2]:.1f}} {self.target_unit}"
+                    "<extra></extra>"
+                )
+
+        except ValueError as e:
+            if str(e) != "No prediction available, prediction is None.":
+                raise e
 
         fig.add_trace(
             go.Scatter(
@@ -537,9 +644,9 @@ class PlotActivities(RunningActivities):
         fig.add_trace(
             go.Scatter(
                 x=x,
-                y=data["speed"],
+                y=self.target,
                 mode="lines",
-                name="Speed",
+                name="Target",
                 line={"color": "#44AF52"},
                 customdata=customdata,
                 hovertemplate=hovertemplate,
@@ -552,7 +659,7 @@ class PlotActivities(RunningActivities):
                     x=x,
                     y=self.prediction,
                     mode="lines",
-                    name="Speed predicted",
+                    name="Target predicted",
                     line={"color": "#8256E9"},
                     customdata=customdata,
                     hovertemplate=hovertemplate,
@@ -562,7 +669,57 @@ class PlotActivities(RunningActivities):
 
         fig.update_xaxes(title="Distance (km)")
         fig.update_yaxes(title="Altitude (m)", secondary_y=False)
-        fig.update_yaxes(title="Speed (m/s)", secondary_y=True)
+        fig.update_yaxes(title=self.target_label, secondary_y=True)
+        return fig
+
+    # ================================================================================== #
+    #                                   PREDICTION PLOT
+    # ================================================================================== #
+    def error_prediction(self) -> go.Figure:
+        """Display the predicted speed vs the true speed on a row of the plot and error histogram on the other row."""
+        if self.prediction is None:
+            raise ValueError("No prediction available")
+
+        fig = _base_layout(make_subplots(rows=2, cols=1), "Prediction vs True Target")
+        fig.add_trace(
+            go.Scatter(
+                x=self.distance_km,
+                y=self.target,
+                mode="lines",
+                name="True target",
+                line={"color": "#44AF52"},
+                hovertemplate="Distance : %{x:.2f} km<br>True target : %{y:.1f} m/s<extra></extra>",
+            ),
+            row=1,
+            col=1,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=self.distance_km,
+                y=self.prediction,
+                mode="lines",
+                name="Predicted target",
+                line={"color": "#8256E9"},
+                hovertemplate="Distance : %{x:.2f} km<br>Predicted target : %{y:.1f} m/s<extra></extra>",
+            ),
+            row=1,
+            col=1,
+        )
+        error = self.prediction - self.target
+        fig.add_trace(
+            go.Histogram(
+                x=error,
+                nbinsx=50,
+                marker={"color": "#E95656"},
+                name="Error histogram",
+            ),
+            row=2,
+            col=1,
+        )
+        fig.update_xaxes(title="Distance (km)", row=1, col=1)
+        fig.update_yaxes(title=self.target_label, row=1, col=1)
+        fig.update_xaxes(title=f"Error ({self.target_unit})", row=2, col=1)
+        fig.update_yaxes(title="Count", row=2, col=1)
         return fig
 
     # ================================================================================== #
@@ -600,7 +757,9 @@ class PlotActivities(RunningActivities):
         return fig
 
 
-
+# ================================================================================= #
+#                                   MINETTI PLOT
+# ================================================================================= #
 def plot_minetti_curve() -> go.Figure:
     """Plot Minetti energy costs relative to flat terrain."""
     slopes = np.linspace(-0.35, 0.35, 100)
