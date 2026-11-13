@@ -112,7 +112,7 @@ def correlation_table(
     """
     dataset = load_dataset(min_distance, max_distance, segment_width)
     plot = dataset.plot
-    plot.change_target("pace")
+    plot.target = "pace"
 
     target = pd.to_numeric(plot.target, errors="coerce")
     target = target.replace([np.inf, -np.inf], np.nan)
@@ -459,7 +459,9 @@ def main() -> None:
         st.error(f"Impossible de charger le dataset : {error}")
         return
 
-    st.sidebar.write(f"Cible courante : `{plot._target}` · {len(dataset._data)} lignes")
+    st.sidebar.write(
+        f"Cible courante : `{plot.target_name}` · {len(dataset._data)} lignes"
+    )
 
     # Le panneau de sélection est rendu AVANT les graphiques : ils lisent la
     # sélection à jour dans le même run.
