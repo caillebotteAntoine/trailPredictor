@@ -1,4 +1,4 @@
-"""Page Streamlit d'analyse des activités de course."""
+"""Streamlit page analysing a single running activity."""
 
 from __future__ import annotations
 
@@ -15,13 +15,19 @@ from TrailPredictor.plot import PlotActivities
 
 @st.cache_data
 def st_load_activities() -> pd.DataFrame:
-    """Charge les activités depuis le fichier CSV."""
+    """Load the running activities from the CSV summary (cached).
+
+    Returns
+    -------
+    pandas.DataFrame
+        Summary rows of the ``run`` activities.
+    """
     activities = load_activities()
     return pd.DataFrame(activities.loc[activities["type"].eq("run")])
 
 
 def _parse_date(value: Any) -> pd.Timestamp:
-    """Interprète les dates françaises de l'export Strava."""
+    """Parse a French date of the Strava export."""
     replacements = {
         "janv.": "Jan",
         "févr.": "Feb",
@@ -43,7 +49,19 @@ def _parse_date(value: Any) -> pd.Timestamp:
 
 
 def format_label(activity: pd.Series) -> str:
-    """Formate une activité pour le sélecteur."""
+    """Format an activity as a selector label.
+
+    Parameters
+    ----------
+    activity : pandas.Series
+        Row of the activity summary, with ``date``, ``distance_m`` and
+        ``name``.
+
+    Returns
+    -------
+    str
+        Label ``"<distance> km — <YYYY-MM-DD> — <name>"``.
+    """
     date = _parse_date(activity["date"])
     date_text = date.strftime("%Y-%m-%d") if not pd.isna(date) else "date inconnue"
     distance = activity["distance_m"] / 1000
@@ -56,7 +74,25 @@ def load_activity(
     segment_width: int,
     _progress_cb: Callable[[float, str], None] | None = None,
 ) -> RunningActivities:
-    """Charge une activité FIT, mise en cache par activité et segment."""
+    """Load the FIT activity of the summary row `activity_id`.
+
+    Parameters
+    ----------
+    activity_id : int
+        Strava identifier of the activity.
+    segment_width : int
+        Segment length in metres.
+
+    Returns
+    -------
+    RunningActivities
+        The segmented activity.
+
+    Raises
+    ------
+    ValueError
+        If `activity_id` is not in the summary.
+    """
     activities = st_load_activities()
     matches = activities.loc[activities["id"].eq(activity_id), "file_name"]
     if matches.empty:
@@ -67,7 +103,20 @@ def load_activity(
 
 
 def render_sidebar(activities: pd.DataFrame) -> tuple[pd.Series, dict[str, Any]]:
-    """Affiche le tri, la sélection et les options de visualisation."""
+    """Render the sort order, activity selector and display options.
+
+    Parameters
+    ----------
+    activities : pandas.DataFrame
+        Running activities to choose from.
+
+    Returns
+    -------
+    selected : pandas.Series
+        Summary row of the selected activity.
+    options : dict[str, Any]
+        Display options chosen in the sidebar.
+    """
     order = st.sidebar.radio(
         "Ordre des activités", ["Décroissant", "Croissant"], horizontal=True
     )
@@ -111,7 +160,13 @@ def _metric_value(value: float, formatter: Callable[[float], str]) -> str | None
 
 
 def render_metrics(plot: PlotActivities) -> None:
-    """Affiche les métriques disponibles dans les données FIT."""
+    """Render the summary metrics available in the FIT data.
+
+    Parameters
+    ----------
+    plot : PlotActivities
+        Activity to summarise.
+    """
     data = plot.data
     distance = pd.to_numeric(data.get("distance"), errors="coerce").max() / 1000
     duration = data["elapsed_time"].dt.total_seconds().sum()
@@ -148,6 +203,7 @@ def _render_chart(
 
 
 def main() -> None:
+    """Render the activity analysis page."""
     st.title("Analyse d'activité Strava")
     activities = st_load_activities()
     if activities.empty:

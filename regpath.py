@@ -1,20 +1,23 @@
-"""regpath — graphique du chemin de régularisation d'un LassoCV ou d'un LassoLarsIC déjà ajusté.
+"""Regularisation path plot of an already fitted LassoCV or LassoLarsIC.
 
-Le panneau du bas montre le critère de sélection de α :
-  * LassoCV     : erreur de validation croisée ± 1 erreur-type (+ règle « 1 erreur-type ») ;
-  * LassoLarsIC : critère d'information (AIC ou BIC) le long du chemin LARS.
+The bottom panel shows the selection criterion of α:
 
-Usage :
+* LassoCV: cross-validation error ± 1 standard error (and the
+  "one standard error" rule);
+* LassoLarsIC: information criterion (AIC or BIC) along the LARS path.
+
+Usage::
+
     from regpath import LassoPath, plot_lasso_path, summarize
 
     res = LassoPath.from_pipeline(lasso_full, X, y_model, lasso_step="lasso")
     fig, axes = plot_lasso_path(res, mse_label="MSE (log1p)")
-    display_bullet(*summarize(res))   # ou : print("\n".join(summarize(res)))
+    display_bullet(*summarize(res))
 
-`y_model` doit être la cible *telle que vue par le Lasso* (par ex. np.log1p(y)
-si la cible est transformée), sinon le chemin recalculé ne correspond pas au critère.
-`from_pipeline` accepte aussi directement l'estimateur (sans Pipeline) ; `lasso_step=None`
-désigne la dernière étape du Pipeline.
+`y_model` must be the target *as seen by the Lasso* (e.g. ``np.log1p(y)``
+when the target is transformed), otherwise the recomputed path does not match
+the criterion. `from_pipeline` also accepts the estimator itself (without a
+Pipeline); ``lasso_step=None`` selects the last step of the Pipeline.
 """
 
 from __future__ import annotations
@@ -45,8 +48,11 @@ def _is_ic(obj) -> bool:
 
 
 def _unwrap_lasso(step, max_depth: int = 5):
-    """Retrouve le LassoCV / LassoLarsIC ajusté, même enveloppé
-    (SelectFromModel, TransformedTargetRegressor, GridSearchCV…)."""
+    """Find the fitted LassoCV / LassoLarsIC, even when wrapped.
+
+    Wrappers such as SelectFromModel, TransformedTargetRegressor or
+    GridSearchCV are unwrapped up to `max_depth` levels.
+    """
     obj = step
     for _ in range(max_depth):
         if _is_cv(obj):
@@ -72,8 +78,10 @@ _unwrap_lasso_cv = _unwrap_lasso  # compatibilité
 
 
 def _positive_alphas(alphas: np.ndarray) -> np.ndarray:
-    """Le chemin LARS se termine souvent en α = 0, non représentable en échelle log :
-    on le remplace par un dixième du plus petit α strictement positif."""
+    """Replace non-positive alphas by a tenth of the smallest positive one.
+
+    The LARS path often ends at α = 0, which cannot be shown on a log scale.
+    """
     alphas = np.asarray(alphas, dtype=float).copy()
     zero = alphas <= 0
     if zero.any():
@@ -83,10 +91,41 @@ def _positive_alphas(alphas: np.ndarray) -> np.ndarray:
 
 @dataclass
 class LassoPath:
-    """Chemin de régularisation + critère de sélection de α.
+    """Regularisation path and selection criterion of α.
 
-    criterion = "cv"            : `crit_path` est la MSE de CV, de forme (n_alphas, n_folds) ;
-    criterion = "aic" ou "bic"  : `crit_path` est le critère d'information, de forme (n_alphas,).
+    Parameters
+    ----------
+    coef_path : pandas.DataFrame
+        Coefficients along the path, indexed by α, one column per feature.
+    crit_alphas : numpy.ndarray of shape (n_alphas,)
+        Values of α where the criterion is evaluated.
+    crit_path : numpy.ndarray of shape (n_alphas, n_folds) or (n_alphas,)
+        Cross-validation MSE when `criterion` is ``"cv"``, information
+        criterion when it is ``"aic"`` or ``"bic"``.
+    alpha : float
+        Selected α (minimum of the criterion).
+    tol : float, optional
+        A feature is active when ``|coef| > tol``. Default is 0.0.
+    criterion : {"cv", "aic", "bic"}, optional
+        Selection criterion. Default is ``"cv"``.
+    alpha_zero : float, optional
+        Value shown in place of α = 0 on the log scale.
+
+    Attributes
+    ----------
+    crit_mean : numpy.ndarray of shape (n_alphas,)
+        Mean criterion over the folds (the criterion itself for AIC / BIC).
+    crit_se : numpy.ndarray of shape (n_alphas,) or None
+        Standard error of the CV criterion, None for AIC / BIC.
+    threshold : float or None
+        Minimum mean CV error plus one standard error, None for AIC / BIC.
+    alpha_1se : float or None
+        Largest α whose mean CV error is below `threshold`, None for
+        AIC / BIC.
+    active : pandas.DataFrame
+        Whether each coefficient is active along the path.
+    n_active : pandas.Series
+        Number of active features along the path.
     """
 
     coef_path: pd.DataFrame  # index = alphas, colonnes = variables
@@ -105,6 +144,7 @@ class LassoPath:
     n_active: pd.Series = field(init=False, repr=False)
 
     def __post_init__(self):
+        """Sort the path and compute the derived criterion statistics."""
         self.criterion = self.criterion.lower()
         self.coef_path = self.coef_path.sort_index(ascending=False)  # α décroissants
         self.crit_alphas = np.asarray(self.crit_alphas, dtype=float)
@@ -128,19 +168,32 @@ class LassoPath:
     # --- propriétés utiles
     @property
     def is_cv(self) -> bool:
+        """Whether α is selected by cross-validation."""
         return self.criterion == "cv"
 
     @property
     def alpha_ref(self) -> float:
-        """α de référence pour la mise en évidence : 1-SE en CV, sinon α retenu."""
+        """Reference α for highlighting: 1-SE α in CV, selected α otherwise."""
         return self.alpha_1se if self.alpha_1se is not None else self.alpha
 
     @property
     def criterion_label(self) -> str:
+        """Display name of the criterion: ``"CV"``, ``"AIC"`` or ``"BIC"``."""
         return "CV" if self.is_cv else self.criterion.upper()
 
     def fmt_alpha(self, alpha: float) -> str:
-        """Formate α en signalant le point α = 0 (moindres carrés) du chemin LARS."""
+        """Format α, flagging the α = 0 (least squares) point of the LARS path.
+
+        Parameters
+        ----------
+        alpha : float
+            Value of α.
+
+        Returns
+        -------
+        str
+            α with 4 significant digits, or a least-squares label.
+        """
         if self.alpha_zero is not None and np.isclose(alpha, self.alpha_zero):
             return "0 (moindres carrés)"
         return f"{alpha:.4g}"
@@ -162,13 +215,51 @@ class LassoPath:
         max_iter: int = 50_000,
         tol: float = 0.0,
     ) -> "LassoPath":
-        """Recalcule le chemin du LassoCV / LassoLarsIC contenu dans `pipeline`.
+        """Recompute the path of the LassoCV / LassoLarsIC in `pipeline`.
 
-        - LassoCV     : chemin coordinate descent sur la grille `alphas_` de la CV ;
-        - LassoLarsIC : chemin LARS exact (mêmes points de rupture que `alphas_`).
+        Parameters
+        ----------
+        pipeline : sklearn.pipeline.Pipeline or estimator
+            Fitted pipeline, or the fitted estimator itself (then without
+            preprocessing). Every step before `lasso_step` is treated as
+            preprocessing.
+        X : array-like of shape (n_samples, n_features)
+            Training data, before preprocessing.
+        y : array-like of shape (n_samples,)
+            Target as seen by the Lasso (after any target transformation).
+        lasso_step : str or None, optional
+            Name of the Lasso step; None selects the last step. Default is
+            ``"lasso"``.
+        feature_names : sequence of str, optional
+            Feature names; inferred from the preprocessing or `X` when
+            omitted.
+        max_iter : int, optional
+            Maximum number of coordinate descent iterations (LassoCV only).
+            Default is 50 000.
+        tol : float, optional
+            A feature is active when ``|coef| > tol``. Default is 0.0.
 
-        Tout ce qui précède `lasso_step` est considéré comme le prétraitement.
-        `pipeline` peut aussi être l'estimateur lui-même (aucun prétraitement).
+        Returns
+        -------
+        LassoPath
+            The recomputed path and its criterion.
+
+        Raises
+        ------
+        TypeError
+            If no fitted LassoCV or LassoLarsIC is found.
+
+        Warns
+        -----
+        UserWarning
+            If the recomputed LARS path does not match ``alphas_`` of the
+            LassoLarsIC, which usually means `y` is not the target seen by
+            the estimator.
+
+        Notes
+        -----
+        LassoCV: coordinate descent path on the CV grid ``alphas_``.
+        LassoLarsIC: exact LARS path (same breakpoints as ``alphas_``).
         """
         if hasattr(pipeline, "named_steps"):
             names = list(pipeline.named_steps)
@@ -230,11 +321,34 @@ class LassoPath:
         return cls(coef_path, crit_alphas, crit_path, alpha, tol, criterion, alpha_zero)
 
     def coefs_at(self, alpha: float) -> pd.Series:
-        """Coefficients au point du chemin le plus proche de `alpha` (en échelle log)."""
+        """Return the coefficients at the path point closest to `alpha`.
+
+        Parameters
+        ----------
+        alpha : float
+            Strictly positive α; closeness is measured on a log scale.
+
+        Returns
+        -------
+        pandas.Series
+            Coefficients, indexed by feature name.
+        """
         i = np.argmin(np.abs(np.log(self.coef_path.index.values) - np.log(alpha)))
         return self.coef_path.iloc[i]
 
     def n_active_at(self, alpha: float) -> int:
+        """Return the number of active features at the path point closest to `alpha`.
+
+        Parameters
+        ----------
+        alpha : float
+            Strictly positive α.
+
+        Returns
+        -------
+        int
+            Number of coefficients with ``|coef| > tol``.
+        """
         return int((self.coefs_at(alpha).abs() > self.tol).sum())
 
 
@@ -253,15 +367,54 @@ def plot_lasso_path(
     n_top_ticks: int = 8,
     figsize: tuple[float, float] = (13, 9.5),
 ):
-    """Chemin des coefficients (haut) et critère de sélection de α (bas).
+    """Plot the coefficient path (top) and the selection criterion of α (bottom).
 
-    En bas : erreur CV ± 1 erreur-type (LassoCV) ou critère AIC/BIC (LassoLarsIC).
+    Parameters
+    ----------
+    res : LassoPath
+        Regularisation path to plot.
+    n_highlight : int, optional
+        Number of coloured features, the largest in ``|coef|`` at the
+        reference α (1-SE α in CV, selected α otherwise). Defaults to every
+        feature active at that α.
+    palette : sequence, optional
+        Colours of the highlighted features. Default is ``PALETTE``.
+    grey : str, optional
+        Colour of the other features. Default is ``GREY``.
+    main : str, optional
+        Colour of the criterion curve. Default is ``MAIN``.
+    accent : str, optional
+        Colour of the selected α. Default is ``ACCENT``.
+    secondary : str, optional
+        Colour of the 1-SE α. Default is ``SECONDARY``.
+    title : str, optional
+        Title of the top panel.
+    cv_title : str, optional
+        Title of the bottom panel, adapted to the criterion by default.
+    mse_label : str, optional
+        y-axis label of the bottom panel, adapted to the criterion by
+        default.
+    n_top_ticks : int, optional
+        Approximate number of ticks of the top axis, which shows the number
+        of active features. Default is 8.
+    figsize : tuple of float, optional
+        Figure size in inches. Default is ``(13, 9.5)``.
 
-    n_highlight : nombre de variables colorées (les plus fortes en |coef| à l'α de
-                  référence : 1-SE en CV, α retenu sinon).
-                  Par défaut : toutes les variables actives à cet α.
-    cv_title, mse_label : titre et libellé de l'axe y du panneau du bas
-                  (par défaut adaptés au critère).
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The figure.
+    axes : tuple of matplotlib.axes.Axes
+        The path axis and the criterion axis.
+
+    See Also
+    --------
+    summarize : Comment sentences for this figure.
+
+    Notes
+    -----
+    The bottom panel shows the CV error ± 1 standard error for a LassoCV, or
+    the AIC / BIC for a LassoLarsIC.
     """
     if cv_title is None:
         cv_title = (
@@ -354,7 +507,20 @@ def plot_lasso_path(
 
 
 def summarize(res: LassoPath, n_first: int = 6) -> list[str]:
-    """Phrases de commentaire du graphique (à passer à print, display_bullet, etc.)."""
+    """Write comment sentences for the regularisation path figure.
+
+    Parameters
+    ----------
+    res : LassoPath
+        Regularisation path.
+    n_first : int, optional
+        Number of first features entering the model to list. Default is 6.
+
+    Returns
+    -------
+    list of str
+        Sentences (in French) to pass to ``print``, ``display_bullet``, etc.
+    """
     entered = res.active.any()
     # α décroissants → le premier True est le plus grand α où la variable est non nulle
     entry_alpha = res.active.idxmax()[entered].sort_values(ascending=False)

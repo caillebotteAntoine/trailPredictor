@@ -1,9 +1,8 @@
-"""Page Streamlit d'exploration du dataset et de ses features.
+"""Streamlit page exploring the dataset and its features.
 
-Disposition : un panneau de sélection à gauche (filtres, presets, tableau
-cliquable avec corrélation et valeurs manquantes) et les graphiques à droite,
-toujours visibles. Mettre SELECTION_IN_SIDEBAR = True pour placer le panneau
-dans la sidebar à la place.
+Layout: a selection panel on the left (filters, presets, clickable table with
+correlation and missing values) and the charts on the right, always visible.
+Set ``SELECTION_IN_SIDEBAR = True`` to put the panel in the sidebar instead.
 """
 
 from __future__ import annotations
@@ -51,7 +50,26 @@ TABLE_COLUMNS = ["Nom", "Spearman", "Manquantes (%)", "Groupe"]
 # --------------------------------------------------------------------------- #
 @st.cache_data
 def load_dataset(min_distance: int, max_distance: int, segment_width: int) -> Dataset:
-    """Charge le dataset via Dataset.load avec les paramètres de la sidebar."""
+    """Load the dataset with the sidebar parameters (cached).
+
+    Parameters
+    ----------
+    min_distance : int
+        Minimum activity distance in km.
+    max_distance : int
+        Maximum activity distance in km.
+    segment_width : int
+        Segment length in metres.
+
+    Returns
+    -------
+    Dataset
+        The loaded dataset.
+
+    See Also
+    --------
+    TrailPredictor.dataset.Dataset.load : Underlying loader.
+    """
     return Dataset.load(
         min_distance=min_distance,
         max_distance=max_distance,
@@ -75,10 +93,22 @@ def _feature_group(name: str) -> str:
 def correlation_table(
     min_distance: int, max_distance: int, segment_width: int
 ) -> pd.DataFrame:
-    """Corrélation de Spearman de chaque feature numérique avec la cible.
+    """Compute the Spearman correlation of each numeric feature with the pace.
 
-    Retourne un tableau trié par |corrélation| décroissante (NaN en dernier),
-    avec les colonnes : Nom, Spearman, Manquantes (%), Groupe.
+    Parameters
+    ----------
+    min_distance : int
+        Minimum activity distance in km.
+    max_distance : int
+        Maximum activity distance in km.
+    segment_width : int
+        Segment length in metres.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Columns ``Nom``, ``Spearman``, ``Manquantes (%)`` and ``Groupe``,
+        sorted by decreasing absolute correlation (NaN last).
     """
     dataset = load_dataset(min_distance, max_distance, segment_width)
     plot = dataset.plot
@@ -125,7 +155,26 @@ def apply_filters(
     min_abs: float,
     max_missing: float,
 ) -> pd.DataFrame:
-    """Réduit le tableau aux features qui passent tous les filtres (ordre conservé)."""
+    """Keep the features that pass every filter, in the same order.
+
+    Parameters
+    ----------
+    correlations : pandas.DataFrame
+        Table returned by `correlation_table`.
+    search : str
+        Case-insensitive substring of the feature name.
+    groups : list of str
+        Allowed feature groups; all groups when empty.
+    min_abs : float
+        Minimum absolute Spearman correlation; no filter when 0.
+    max_missing : float
+        Maximum percentage of missing values.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Filtered table with a fresh index.
+    """
     mask = correlations["Nom"].str.contains(search, case=False, na=False, regex=False)
     if groups:
         mask &= correlations["Groupe"].isin(groups)
@@ -154,10 +203,21 @@ PRESETS: dict[str, Callable[[pd.DataFrame], list[str]]] = {
 
 
 def merge_edits(current: list[str], flags: dict[str, bool]) -> list[str]:
-    """Applique les cases cochées du tableau à la sélection.
+    """Apply the ticked boxes of the table to the selection.
 
-    Les features absentes du tableau (masquées par un filtre) ne changent pas ;
-    l'ordre de sélection est conservé et les nouvelles features sont ajoutées à la fin.
+    Parameters
+    ----------
+    current : list of str
+        Currently selected features, in selection order.
+    flags : dict[str, bool]
+        Tick state of each feature shown in the table.
+
+    Returns
+    -------
+    list of str
+        Updated selection. Features missing from `flags` (hidden by a
+        filter) are unchanged, the order is kept and new features are
+        appended.
     """
     updated = [name for name in current if flags.get(name, True)]
     updated += [name for name, on in flags.items() if on and name not in updated]
@@ -168,7 +228,7 @@ def merge_edits(current: list[str], flags: dict[str, bool]) -> list[str]:
 #                              PANNEAU DE SÉLECTION
 # --------------------------------------------------------------------------- #
 def _set_selection(names: list[str]) -> None:
-    """Change la sélection depuis l'extérieur du tableau et réinitialise celui-ci."""
+    """Set the selection from outside the table and reset the table."""
     st.session_state[SELECTION_KEY] = list(dict.fromkeys(names))
     st.session_state[REVISION_KEY] += 1
     st.rerun()
@@ -180,17 +240,30 @@ def _reset_filters() -> None:
 
 
 def _table_key(pool: pd.DataFrame) -> str:
-    """Clé du tableau : change si le contenu affiché ou la sélection externe change.
+    """Build the table key, which changes with the shown rows or external selection.
 
-    Elle ne change PAS quand l'utilisateur coche une case, sinon les cases
-    cochées successivement seraient perdues.
+    It does NOT change when the user ticks a box, otherwise successive ticks
+    would be lost.
     """
     digest = hashlib.md5("|".join(pool["Nom"]).encode()).hexdigest()[:8]
     return f"dataset_table_{st.session_state[REVISION_KEY]}_{digest}"
 
 
 def selection_table(pool: pd.DataFrame, selected: list[str]) -> list[str]:
-    """Tableau cliquable (case « ✓ » par ligne) ; retourne la nouvelle sélection."""
+    """Render the clickable feature table, with a "✓" box per row.
+
+    Parameters
+    ----------
+    pool : pandas.DataFrame
+        Features to show, as returned by `apply_filters`.
+    selected : list of str
+        Currently selected features.
+
+    Returns
+    -------
+    list of str
+        Selection after the user's ticks.
+    """
     frame = pool[TABLE_COLUMNS].copy()
     frame.insert(0, "✓", frame["Nom"].isin(selected))
     edited = st.data_editor(
@@ -220,7 +293,15 @@ def selection_table(pool: pd.DataFrame, selected: list[str]) -> list[str]:
 
 
 def render_selection_panel(plot: PlotDataset, correlations: pd.DataFrame) -> None:
-    """Filtres, presets et tableau cliquable."""
+    """Render the filters, presets and clickable feature table.
+
+    Parameters
+    ----------
+    plot : PlotDataset
+        Dataset being explored.
+    correlations : pandas.DataFrame
+        Table returned by `correlation_table`.
+    """
     ranked = correlations["Nom"].tolist()  # numériques, triées par |rho|
     if not ranked:
         st.warning("Aucune feature numérique disponible dans ce dataset.")
@@ -309,7 +390,13 @@ def _render_chart(
 
 
 def render_charts(plot: PlotDataset) -> None:
-    """Affiche l'histogramme puis les graphiques des features sélectionnées."""
+    """Render the target histogram, then the charts of the selected features.
+
+    Parameters
+    ----------
+    plot : PlotDataset
+        Dataset being explored.
+    """
     selected = st.session_state.get(SELECTION_KEY, [])
     st.subheader(f"Graphiques ({len(selected)} feature(s))")
     if len(selected) > 12:
@@ -351,6 +438,7 @@ def render_charts(plot: PlotDataset) -> None:
 #                                    PAGE
 # --------------------------------------------------------------------------- #
 def main() -> None:
+    """Render the dataset exploration page."""
     st.title("Dataset / Features")
     st.sidebar.subheader("Paramètres du dataset")
     min_distance = st.sidebar.number_input(
