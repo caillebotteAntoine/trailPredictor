@@ -5,6 +5,9 @@ correlation and missing values) and the charts on the right, always visible.
 Set ``SELECTION_IN_SIDEBAR = True`` to put the panel in the sidebar instead.
 """
 
+# Streamlit orders pages by their numeric file-name prefix.
+# pylint: disable=invalid-name
+
 from __future__ import annotations
 
 import hashlib
@@ -117,13 +120,12 @@ def correlation_table(
     target = pd.to_numeric(plot.target, errors="coerce")
     target = target.replace([np.inf, -np.inf], np.nan)
 
+    data = dataset.data
     names = [
-        name
-        for name in plot.features
-        if pd.api.types.is_numeric_dtype(dataset._data[name])
+        name for name in plot.features if pd.api.types.is_numeric_dtype(data[name])
     ]
     frame = (
-        dataset._data[names]
+        data[names]
         .apply(pd.to_numeric, errors="coerce")
         .astype(float)
         .replace([np.inf, -np.inf], np.nan)
@@ -135,9 +137,7 @@ def correlation_table(
         {
             "Nom": rho.index,
             "Spearman": rho.to_numpy(),
-            "Manquantes (%)": (dataset._data[names].isna().mean() * 100)
-            .round(2)
-            .to_numpy(),
+            "Manquantes (%)": (data[names].isna().mean() * 100).round(2).to_numpy(),
             "Groupe": [_feature_group(name) for name in rho.index],
         }
     )
@@ -385,7 +385,8 @@ def _render_chart(
         figure = plot.merge_figure(method, title=title, **kwargs)
         figure.update_layout(height=700)
         st.plotly_chart(figure, key=key, **STRETCH)
-    except Exception as error:
+    # UI boundary: any plotting failure is shown instead of crashing the page.
+    except Exception as error:  # pylint: disable=broad-exception-caught
         st.warning(f"{title} : {error}")
 
 
@@ -455,12 +456,13 @@ def main() -> None:
         dataset = load_dataset(*params)
         plot = dataset.plot
         correlations = correlation_table(*params)
-    except Exception as error:
+    # UI boundary: any loading failure is shown instead of crashing the page.
+    except Exception as error:  # pylint: disable=broad-exception-caught
         st.error(f"Impossible de charger le dataset : {error}")
         return
 
     st.sidebar.write(
-        f"Cible courante : `{plot.target_name}` · {len(dataset._data)} lignes"
+        f"Cible courante : `{plot.target_name}` · {len(dataset.data)} lignes"
     )
 
     # Le panneau de sélection est rendu AVANT les graphiques : ils lisent la

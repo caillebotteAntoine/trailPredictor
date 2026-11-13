@@ -1,5 +1,8 @@
 """Streamlit page analysing a single running activity."""
 
+# Streamlit orders pages by their numeric file-name prefix.
+# pylint: disable=invalid-name
+
 from __future__ import annotations
 
 from typing import Any, Callable
@@ -198,7 +201,8 @@ def _render_chart(
         if display_height is not None:
             figure.update_layout(height=display_height)
         st.plotly_chart(figure, width="stretch", key=key)
-    except Exception as error:
+    # UI boundary: any plotting failure is shown instead of crashing the page.
+    except Exception as error:  # pylint: disable=broad-exception-caught
         st.warning(f"{name} : {error}")
 
 
@@ -220,7 +224,8 @@ def main() -> None:
             int(selected["id"]), options["segment_width"], update_progress
         )
         plot = PlotActivities(running_activity, options["drop_threshold"])
-    except Exception as error:
+    # UI boundary: any loading failure is shown instead of crashing the page.
+    except Exception as error:  # pylint: disable=broad-exception-caught
         st.error(f"Impossible de charger l'activité : {error}")
         return
     finally:
