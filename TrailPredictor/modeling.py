@@ -2,7 +2,7 @@
 
 import numpy as np
 from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
-from sklearn.linear_model import LinearRegression, RidgeCV, LassoCV
+from sklearn.linear_model import LassoCV, LinearRegression, RidgeCV
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 

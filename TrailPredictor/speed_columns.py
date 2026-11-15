@@ -7,7 +7,6 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-
 Target = Literal[
     "pace",
     "log_pace",

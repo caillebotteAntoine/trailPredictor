@@ -21,7 +21,6 @@ import streamlit as st
 from TrailPredictor.dataset import Dataset
 from TrailPredictor.plot import PlotDataset
 
-
 SELECTION_IN_SIDEBAR = False
 
 # Streamlit récent : remplacer par {"width": "stretch"} si l'avertissement de

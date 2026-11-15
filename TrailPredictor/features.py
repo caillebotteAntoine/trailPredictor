@@ -24,7 +24,7 @@ HearthRateZoneLabel = Literal[
     "Endurance anaérobie",
     "Anaérobie (Puiss.)",
 ]
-HEART_RATE_ZONES = {
+HEART_RATE_ZONES: dict[HearthRateZoneLabel, tuple[int, int]] = {
     "Récupération": (0, 142),
     "Aérobic (Endur.)": (142, 160),
     "Aérobic (Puiss.)": (161, 169),
