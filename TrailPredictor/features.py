@@ -1,16 +1,37 @@
 """Construction of the raw dataset and of the segment features."""
 
-import pandas as pd
-from sklearn.model_selection import train_test_split
+from typing import Literal
 
+import numpy as np
+import pandas as pd
+from pandas.core.groupby.generic import SeriesGroupBy
+from sklearn.model_selection import train_test_split
 
 from TrailPredictor.activities import RunningActivities
 from TrailPredictor.load_fit import ProgressCallback
 from TrailPredictor.loading import load_activities
-from TrailPredictor.minetti import cost_of_walking, cost_of_running
+from TrailPredictor.minetti import cost_of_running, cost_of_walking
 
 WINDOWS_KM = (1, 3, 5, 10)
 FEATURES_SUFFIXES = ("done", "remaining")
+
+
+HearthRateZoneLabel = Literal[
+    "Récupération",
+    "Aérobic (Endur.)",
+    "Aérobic (Puiss.)",
+    "Seuil",
+    "Endurance anaérobie",
+    "Anaérobie (Puiss.)",
+]
+HEART_RATE_ZONES = {
+    "Récupération": (0, 142),
+    "Aérobic (Endur.)": (142, 160),
+    "Aérobic (Puiss.)": (161, 169),
+    "Seuil": (170, 182),
+    "Endurance anaérobie": (183, 189),
+    "Anaérobie (Puiss.)": (189, 210),
+}
 
 
 def export_activities(
@@ -160,7 +181,9 @@ def split_test_train(
     return train_data, test_data
 
 
-def _window_sum(s: pd.Series, k: int, direction: str = "front") -> pd.Series:
+def _window_sum(
+    s: pd.Series | SeriesGroupBy, k: int, direction: str = "front"
+) -> pd.Series:
     """Sum over the `k` previous ('back') or next ('front') segments.
 
     The current segment is excluded; at the edges, the available segments
@@ -185,6 +208,7 @@ def _window_sum(s: pd.Series, k: int, direction: str = "front") -> pd.Series:
 def build_features(
     dataset: pd.DataFrame,
     windows_km: tuple = WINDOWS_KM,
+    drop_threshold: float = 2.0,
 ) -> pd.DataFrame:
     """Build the predictors of each segment.
 
@@ -196,6 +220,8 @@ def build_features(
     windows_km : tuple of float, optional
         Window lengths in km of the back / front elevation sums. Default is
         ``WINDOWS_KM``.
+    drop_threshold : float, optional
+        Threshold for classifying a segment as uphill or downhill. Default is 2.0.
 
     Returns
     -------
@@ -210,6 +236,10 @@ def build_features(
     TrailPredictor.minetti.cost_of_running : Running energy cost.
     """
     x = dataset.copy()
+
+    if "activity_id" not in x.columns:
+        x["activity_id"] = 0  # single activity
+
     x_grp = x.groupby("activity_id")
 
     segment_width = x["distance"].diff().median()  # segment width in meters
@@ -262,8 +292,32 @@ def build_features(
     x["walking_cost"] = cost_of_walking(x["slope"]) / cost_of_walking(0)
     x["running_cost"] = cost_of_running(x["slope"]) / cost_of_running(0)
 
-    # x["pause"] = x["speed"] < 1.0  # speed < 1 m/s is considered a pause
+    # if the speed is small and the cost of running is low, then it is likely a pause.
+    # This can be used to filter out segments that are not representative of the activity.
+    x["pause"] = (x["speed"] < 1.0) & (x["running_cost"] < 1.5)
 
     # removing done because it is redundant with distance
     x.drop(columns="distance_done", inplace=True)
+
+    x["drop_category"] = np.select(
+        [
+            x["altitude_drop"] > drop_threshold,
+            x["altitude_drop"] < -drop_threshold,
+        ],
+        ["Uphill", "Downhill"],
+        default="Flat",
+    )
+
+    x["heart_rate_zone"] = np.select(
+        [
+            x["heart_rate"].between(z[0], z[1], inclusive="left")
+            for z in HEART_RATE_ZONES.values()
+        ],
+        list(HEART_RATE_ZONES.keys()),
+        default="Hors zones",
+    )
+
+    if x["activity_id"].nunique() == 1:
+        x.drop(columns="activity_id", inplace=True)
+
     return x

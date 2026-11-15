@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TypeAlias
-
 import numpy as np
+import pandas as pd
 
-
-Numeric: TypeAlias = float | np.ndarray
+type Numeric = float | np.ndarray | pd.Series
 
 _MIN_GRADE = -0.45
 _MAX_GRADE = 0.45

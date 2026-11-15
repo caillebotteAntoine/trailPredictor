@@ -1,29 +1,25 @@
 """Plotly figures for the dataset, the activities and the Minetti curves."""
 
 from collections.abc import Callable
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from TrailPredictor.activities import RunningActivities
-from TrailPredictor.speed_columns import TARGETS
 from TrailPredictor.dataset import Dataset
+from TrailPredictor.features import HEART_RATE_ZONES, build_features
 from TrailPredictor.minetti import cost_of_running, cost_of_walking
-from TrailPredictor.speed_columns import format_pace
+from TrailPredictor.speed_columns import TARGETS, format_pace
 
 DropCategory = Literal["Uphill", "Downhill", "Flat"]
 CATEGORY_COLORS = {"Uphill": "#0072B2", "Downhill": "#D55E00", "Flat": "#777777"}
 
-HearthRateZoneLabel = Literal["Endurance", "Seuil", "Haut", "Hors zones"]
-HEART_RATE_ZONES = {
-    "Endurance": (120, 150),
-    "Seuil": (150, 170),
-    "Haut": (170, 210),
-    "Hors zones": (0, 120),
-}
+PAUSE_COLOR = "#004E00"
+PAUSE_MARKER_SIZE = 7
 
 
 def _base_layout(fig: go.Figure, title: str, subtitle: str = "") -> go.Figure:
@@ -326,38 +322,7 @@ class PlotActivities(RunningActivities):
             running_activities.data, prediction=running_activities._prediction
         )
         self._name = running_activities.name
-        self._data = self._data[
-            [
-                "timestamp",
-                "elapsed_time",
-                "position_lat",
-                "position_long",
-                "distance",
-                "altitude",
-                "heart_rate",
-            ]
-            + list(TARGETS)
-        ]
-
-        self._data["altitude_drop"] = self._data["altitude"].diff()
-
-        self._data["drop_category"] = np.select(
-            [
-                self._data["altitude_drop"] > drop_threshold,
-                self._data["altitude_drop"] < -drop_threshold,
-            ],
-            ["Uphill", "Downhill"],
-            default="Flat",
-        )
-
-        self._data["heart_rate_zone"] = np.select(
-            [
-                self._data["heart_rate"].between(z[0], z[1], inclusive="left")
-                for z in HEART_RATE_ZONES.values()
-            ],
-            list(HEART_RATE_ZONES.keys()),
-            default="Hors zones",
-        )
+        self._data = build_features(self._data, drop_threshold=drop_threshold)
 
     @property
     def target_label(self) -> str:
@@ -417,7 +382,7 @@ class PlotActivities(RunningActivities):
         segment : pandas.DataFrame
             Rows of the run.
         """
-        for zone in HearthRateZoneLabel.__args__:
+        for zone in HEART_RATE_ZONES:
             indexes = np.flatnonzero(self._data["heart_rate_zone"] == zone)
             if indexes.size == 0:
                 continue
@@ -431,6 +396,54 @@ class PlotActivities(RunningActivities):
                     continue
 
                 yield zone, idx, self._data.iloc[idx]
+
+    def _add_pause_markers(
+        self,
+        fig: go.Figure,
+        x: npt.ArrayLike,
+        y: npt.ArrayLike,
+        trace_type: Callable[..., go.Scatter] = go.Scatter,
+        **add_trace_kwargs: Any,
+    ) -> None:
+        """Overlay small markers on the segments flagged as pauses.
+
+        Nothing is added when the activity has no pause.
+
+        Parameters
+        ----------
+        fig : plotly.graph_objects.Figure
+            Figure to which the markers are added (modified in place).
+        x, y : array-like of shape (n,)
+            Coordinates of every segment, aligned with the activity data;
+            only the paused segments are drawn.
+        trace_type : callable, optional
+            Plotly trace class; ``go.Scatter`` by default. Map traces take
+            ``lat``/``lon`` instead of ``x``/``y``.
+        **add_trace_kwargs
+            Forwarded to ``fig.add_trace`` (e.g. ``row``, ``col``,
+            ``secondary_y``).
+        """
+        is_pause = self._data["pause"].to_numpy(dtype=bool)
+        if not is_pause.any():
+            return
+        x_pause = np.asarray(x)[is_pause]
+        y_pause = np.asarray(y)[is_pause]
+        is_map = trace_type is not go.Scatter
+        coordinates = (
+            {"lat": x_pause, "lon": y_pause} if is_map else {"x": x_pause, "y": y_pause}
+        )
+        fig.add_trace(
+            trace_type(
+                **coordinates,
+                mode="markers",
+                marker={"color": PAUSE_COLOR, "size": PAUSE_MARKER_SIZE},
+                name="Pause",
+                legendgroup="pause",
+                hoverinfo="skip" if is_map else None,
+                hovertemplate=None if is_map else "Pause<extra></extra>",
+            ),
+            **add_trace_kwargs,
+        )
 
     # ===================================================================================== #
     #                                   ALTITUDE PLOT
@@ -472,6 +485,7 @@ class PlotActivities(RunningActivities):
             )
             show_legend[category] = False
 
+        self._add_pause_markers(fig, self.distance_km, self._data["altitude"])
         fig.update_xaxes(title="Distance (km)")
         fig.update_yaxes(title="Altitude (m)")
         return fig
@@ -576,6 +590,7 @@ class PlotActivities(RunningActivities):
                 name="Arrivée",
             )
         )
+        self._add_pause_markers(fig, latitude, longitude, trace_type=map_trace)
         if show_km_markers:
             targets = np.arange(1000, distance.max(), 1000)
             positions = np.asarray(
@@ -618,7 +633,8 @@ class PlotActivities(RunningActivities):
         """
         data = self._data.copy()
         distance = data["distance"]
-        pace = pd.to_numeric(self._data["pace"], errors="coerce")
+        raw_pace = pd.to_numeric(self._data["pace"], errors="coerce")
+        pace = raw_pace.copy()
         # set to NA the pace bigger than 20 min/km
         pace[pace > 20] = np.nan
         average = pace.mean()
@@ -657,6 +673,8 @@ class PlotActivities(RunningActivities):
             line_dash="dot",
             annotation_text=f"Moyenne : {_pace_text(average)}",
         )
+        # Pauses are usually slower than the displayed range: pin them to its edge.
+        self._add_pause_markers(fig, distance / 1000, raw_pace.clip(upper=pace.max()))
         ticks, labels = _pace_ticks(pace)
         fig.update_xaxes(title="Distance (km)")
 
@@ -725,6 +743,7 @@ class PlotActivities(RunningActivities):
             ),
             secondary_y=True,
         )
+        self._add_pause_markers(fig, x, data["heart_rate"], secondary_y=True)
         fig.update_xaxes(
             title="Distance (km)" if x_axis == "distance" else "Time (min)"
         )
@@ -830,6 +849,7 @@ class PlotActivities(RunningActivities):
                 secondary_y=True,
             )
 
+        self._add_pause_markers(fig, x, self.target, secondary_y=True)
         fig.update_xaxes(title="Distance (km)")
         fig.update_yaxes(title="Altitude (m)", secondary_y=False)
         fig.update_yaxes(title=self.target_label, secondary_y=True)
@@ -885,6 +905,7 @@ class PlotActivities(RunningActivities):
             row=1,
             col=1,
         )
+        self._add_pause_markers(fig, self.distance_km, self.target, row=1, col=1)
         error = self.prediction - self.target
         fig.add_trace(
             go.Histogram(
@@ -917,7 +938,7 @@ class PlotActivities(RunningActivities):
             zone: self._data.loc[self._data["heart_rate_zone"].eq(zone), "elapsed_time"]
             .dt.total_seconds()
             .sum()
-            for zone in HearthRateZoneLabel.__args__
+            for zone in HEART_RATE_ZONES
         }
 
         total = sum(durations.values())

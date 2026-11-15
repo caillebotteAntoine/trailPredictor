@@ -6,15 +6,13 @@ from warnings import warn
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
 
 from TrailPredictor.activities import RunningActivities
-from TrailPredictor.utils import COMPUTED_DIR
-from TrailPredictor.features import create_dataset, split_test_train
-from TrailPredictor.features import build_features
+from TrailPredictor.features import build_features, create_dataset, split_test_train
 from TrailPredictor.load_fit import ProgressCallback
-from TrailPredictor.speed_columns import add_speed_columns, TARGETS, Target
-
+from TrailPredictor.speed_columns import TARGETS, Target, add_speed_columns
+from TrailPredictor.utils import COMPUTED_DIR
 
 # Never used as predictors: identifiers, raw time information (elapsed_time and
 # timestamp give the pace directly), heart rate (consequence of the effort),
@@ -29,6 +27,8 @@ META_COLUMNS = [
     "position_lat",
     "position_long",
 ]
+CATEGORICAL_COLUMNS = ["heart_rate_zone", "drop_category"]
+
 TARGET_COLUMNS = list(TARGETS)
 # prediction columns (e.g. "pace_pred") must never leak into the predictors
 PREDICTION_COLUMNS = [f"{t}_pred" for t in TARGETS]
@@ -142,7 +142,8 @@ class Dataset:
         """Build the preprocessing step that standardises the features.
 
         Every feature is scaled except the ``*_ratio`` features, which are
-        already in ``[0, 1]``.
+        already in ``[0, 1]`` and the categorical features, which must be
+        one-hot encoded in a separate step.
 
         Returns
         -------
@@ -154,10 +155,18 @@ class Dataset:
         Put it in a ``Pipeline`` so that the mean and standard deviation are
         computed on the training set only.
         """
-        to_scale = [col for col in self._features if not col.endswith("_ratio")]
+        to_scale = [
+            col
+            for col in self._features
+            if not col.endswith("_ratio") and col not in CATEGORICAL_COLUMNS
+        ]
+        to_onehot = [col for col in self._features if col in CATEGORICAL_COLUMNS]
 
         return ColumnTransformer(
-            transformers=[("scale", StandardScaler(), to_scale)],
+            transformers=[
+                ("scale", StandardScaler(), to_scale),
+                ("onehot", OneHotEncoder(sparse_output=False), to_onehot),
+            ],
             remainder="passthrough",  # do not transform other columns
             verbose_feature_names_out=False,  # do not add transformer name to output column names
         ).set_output(transform="pandas")
