@@ -16,6 +16,7 @@ poetry run pytest tests/test_x.py -k name   # run a single test
 poetry run ruff check . --fix    # lint
 poetry run ruff format .         # format
 poetry run mypy TrailPredictor   # type-check
+poetry run pre-commit run --all-files   # all hooks: ruff, pylint, vulture, deptry
 poetry run streamlit run app.py  # launch the app
 ```
 
@@ -27,7 +28,7 @@ poetry run streamlit run app.py  # launch the app
 ## Workflow
 1. **Reuse** existing helpers and test fixtures instead of duplicating them.
 2. **Keep diffs focused.** Change only what the task requires; no drive-by refactors or reformatting of untouched code. Suggest broader refactors separately.
-3. **Verify.** After changes, run the relevant tests, `ruff` and `mypy`. Do not report a task as done while checks fail.
+3. **Verify.** After changes, run the relevant tests, `mypy`, and the pre-commit hooks (ruff, pylint, vulture, deptry). Do not report a task as done while checks fail.
 4. **Never weaken a test to make it pass.** If a test looks wrong, explain why and ask.
 5. Don't add new dependencies without asking.
 
