@@ -9,19 +9,11 @@ SEGMENT_WIDTH = 100
 
 
 @pytest.fixture
-def fit_record() -> pd.DataFrame:
+def fit_record(make_fit_record) -> pd.DataFrame:
     """Six records spread over two 100 m segments."""
-    altitude = [100.0, 110.0, 105.0, 120.0, 115.0, 100.0]
-    return pd.DataFrame(
-        {
-            "timestamp": pd.date_range("2026-01-01", periods=6, freq="10s"),
-            "distance": [0.0, 30.0, 60.0, 110.0, 140.0, 190.0],
-            "altitude": altitude,
-            "enhanced_altitude": altitude,
-            "position_lat": [0] * 6,
-            "position_long": [0] * 6,
-            "heart_rate": [140.0] * 6,
-        }
+    return make_fit_record(
+        distance=[0.0, 30.0, 60.0, 110.0, 140.0, 190.0],
+        altitude=[100.0, 110.0, 105.0, 120.0, 115.0, 100.0],
     )
 
 

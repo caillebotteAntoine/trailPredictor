@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from TrailPredictor.features import build_features
+from TrailPredictor.features import HEART_RATE_ZONES, build_features
 
 # --------------------------------------------------------------------------- #
 # Valeurs attendues (calculées à la main), par activité
@@ -20,54 +20,44 @@ EXPECTED = {
         "altitude_drop_neg": [0, 0, -5, 0, 0, -15],
         # --- done / remaining / total ---
         "altitude_drop_pos_done": [0, 10, 10, 20, 20, 20],
-        "altitude_drop_pos_remaining": [20, 20, 10, 10, 0, 0],
+        "altitude_drop_pos_remaining": [20, 10, 10, 0, 0, 0],
         "altitude_drop_pos_total": [20] * 6,
         "altitude_drop_neg_done": [0, 0, -5, -5, -5, -20],
-        "altitude_drop_neg_remaining": [-20, -20, -20, -15, -15, -15],
+        "altitude_drop_neg_remaining": [-20, -20, -15, -15, -15, 0],
         "altitude_drop_neg_total": [-20] * 6,
-        "distance_done": [1000, 2000, 3000, 4000, 5000, 6000],
-        "distance_remaining": [6000, 5000, 4000, 3000, 2000, 1000],
+        "distance_remaining": [5000, 4000, 3000, 2000, 1000, 0],
         "distance_total": [6000] * 6,
         # --- ratios (= done / total, remaining / total) ---
         "altitude_drop_pos_done_ratio": [0, 0.5, 0.5, 1, 1, 1],
-        "altitude_drop_pos_remaining_ratio": [1, 1, 0.5, 0.5, 0, 0],
+        "altitude_drop_pos_remaining_ratio": [1, 0.5, 0.5, 0, 0, 0],
         "altitude_drop_neg_done_ratio": [0, 0, 0.25, 0.25, 0.25, 1],
-        "altitude_drop_neg_remaining_ratio": [1, 1, 1, 0.75, 0.75, 0.75],
-        "distance_done_ratio": [1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6, 1],
-        "distance_remaining_ratio": [1, 5 / 6, 4 / 6, 3 / 6, 2 / 6, 1 / 6],
-        # --- fenêtres k = 3 (segment courant exclu) ---
-        "altitude_drop_pos_back_3": [0, 0, 10, 10, 20, 10],
-        "altitude_drop_pos_front_3": [20, 10, 10, 0, 0, 0],
-        "altitude_drop_neg_back_3": [0, 0, 0, -5, -5, -5],
-        "altitude_drop_neg_front_3": [-5, -5, -15, -15, -15, 0],
-        "distance_back_3": [0, 1000, 2000, 3000, 3000, 3000],
-        "distance_front_3": [3000, 3000, 3000, 2000, 1000, 0],
+        "altitude_drop_neg_remaining_ratio": [1, 1, 0.75, 0.75, 0.75, 0],
+        # --- fenêtres de 3 km, k = 3 (segment courant exclu) ---
+        "altitude_drop_pos_back_3km": [0, 0, 10, 10, 20, 10],
+        "altitude_drop_pos_front_3km": [20, 10, 10, 0, 0, 0],
+        "altitude_drop_neg_back_3km": [0, 0, 0, -5, -5, -5],
+        "altitude_drop_neg_front_3km": [-5, -5, -15, -15, -15, 0],
     },
     2: {
         "altitude_drop": [0, 0, 10, -5],
         "altitude_drop_pos": [0, 0, 10, 0],
         "altitude_drop_neg": [0, 0, 0, -5],
         "altitude_drop_pos_done": [0, 0, 10, 10],
-        "altitude_drop_pos_remaining": [10, 10, 10, 0],
+        "altitude_drop_pos_remaining": [10, 10, 0, 0],
         "altitude_drop_pos_total": [10] * 4,
         "altitude_drop_neg_done": [0, 0, 0, -5],
-        "altitude_drop_neg_remaining": [-5, -5, -5, -5],
+        "altitude_drop_neg_remaining": [-5, -5, -5, 0],
         "altitude_drop_neg_total": [-5] * 4,
-        "distance_done": [1000, 2000, 3000, 4000],
-        "distance_remaining": [4000, 3000, 2000, 1000],
+        "distance_remaining": [3000, 2000, 1000, 0],
         "distance_total": [4000] * 4,
         "altitude_drop_pos_done_ratio": [0, 0, 1, 1],
-        "altitude_drop_pos_remaining_ratio": [1, 1, 1, 0],
+        "altitude_drop_pos_remaining_ratio": [1, 1, 0, 0],
         "altitude_drop_neg_done_ratio": [0, 0, 0, 1],
-        "altitude_drop_neg_remaining_ratio": [1, 1, 1, 1],
-        "distance_done_ratio": [0.25, 0.5, 0.75, 1],
-        "distance_remaining_ratio": [1, 0.75, 0.5, 0.25],
-        "altitude_drop_pos_back_3": [0, 0, 0, 10],
-        "altitude_drop_pos_front_3": [10, 10, 0, 0],
-        "altitude_drop_neg_back_3": [0, 0, 0, 0],
-        "altitude_drop_neg_front_3": [-5, -5, -5, 0],
-        "distance_back_3": [0, 1000, 2000, 3000],
-        "distance_front_3": [3000, 2000, 1000, 0],
+        "altitude_drop_neg_remaining_ratio": [1, 1, 1, 0],
+        "altitude_drop_pos_back_3km": [0, 0, 0, 10],
+        "altitude_drop_pos_front_3km": [10, 10, 0, 0],
+        "altitude_drop_neg_back_3km": [0, 0, 0, 0],
+        "altitude_drop_neg_front_3km": [-5, -5, -5, 0],
     },
 }
 
@@ -149,16 +139,10 @@ def test_cumulative_features(features, col):
     _assert_column(features, col)
 
 
-@pytest.mark.parametrize(
-    "feature", ["altitude_drop_pos", "altitude_drop_neg", "distance"]
-)
-def test_done_plus_remaining_minus_current_equals_total(features, feature):
-    """Invariant : done + remaining - valeur courante == total."""
-    lhs = (
-        features[f"{feature}_done"]
-        + features[f"{feature}_remaining"]
-        - features[feature]
-    )
+@pytest.mark.parametrize("feature", ["altitude_drop_pos", "altitude_drop_neg"])
+def test_done_plus_remaining_equals_total(features, feature):
+    """Invariant: done (current segment included) + remaining == total."""
+    lhs = features[f"{feature}_done"] + features[f"{feature}_remaining"]
     np.testing.assert_allclose(lhs, features[f"{feature}_total"])
 
 
@@ -184,20 +168,120 @@ def test_window_features(features, col):
 
 
 def test_windows_do_not_leak_across_activities(features):
+    """A leak would add the uphill of the neighbouring activity (10 m each way)."""
     first = features.groupby("activity_id").head(1)
     last = features.groupby("activity_id").tail(1)
-    assert (first["distance_back_3"] == 0).all()
-    assert (last["distance_front_3"] == 0).all()
+    assert (first["altitude_drop_pos_back_3km"] == 0).all()
+    assert (last["altitude_drop_pos_front_3km"] == 0).all()
 
 
 def test_window_columns_follow_windows_km_argument(dataset):
-    """windows_km=(1, 3) avec segments de 1 km -> k = 1 et k = 3."""
+    """windows_km=(1, 3) with 1 km segments -> k = 1 and k = 3."""
     out = build_features(dataset, windows_km=(1, 3))
-    for k in (1, 3):
-        assert f"distance_back_{k}" in out.columns
-        assert f"distance_front_{k}" in out.columns
-    # k = 1 : seulement le segment voisin
+    for w in (1, 3):
+        assert f"altitude_drop_pos_back_{w}km" in out.columns
+        assert f"altitude_drop_pos_front_{w}km" in out.columns
+    # k = 1: only the previous segment
     np.testing.assert_allclose(
-        out.loc[out["activity_id"] == 1, "distance_back_1"],
-        [0, 1000, 1000, 1000, 1000, 1000],
+        out.loc[out["activity_id"] == 1, "altitude_drop_pos_back_1km"],
+        [0, 0, 10, 0, 10, 0],
     )
+
+
+# --------------------------------------------------------------------------- #
+# Pauses
+# --------------------------------------------------------------------------- #
+def test_pause_on_slow_flat_segments(features):
+    expected = {
+        1: [False, False, True, False, False, False],
+        2: [False, False, False, True],
+    }
+    for activity_id, pause in expected.items():
+        actual = features.loc[features["activity_id"] == activity_id, "pause"]
+        assert actual.tolist() == pause
+
+
+def test_slow_steep_segment_is_not_a_pause(make_segments):
+    """Walking slowly up a 20 % slope is effort, not a pause."""
+    steep = make_segments([100.0, 300.0], paused=[True, True])
+    out = build_features(steep, windows_km=(1,))
+    assert out["running_cost"].iloc[1] > 1.5
+    assert not out["pause"].iloc[1]
+
+
+# --------------------------------------------------------------------------- #
+# Drop category
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    ("drop_threshold", "expected_activity_1"),
+    [
+        (2.0, ["Flat", "Uphill", "Downhill", "Uphill", "Flat", "Downhill"]),
+        # the threshold is strict: a 10 m drop is flat with a 10 m threshold
+        (10.0, ["Flat", "Flat", "Flat", "Flat", "Flat", "Downhill"]),
+    ],
+)
+def test_drop_category(dataset, drop_threshold, expected_activity_1):
+    out = build_features(dataset, windows_km=(3,), drop_threshold=drop_threshold)
+    actual = out.loc[out["activity_id"] == 1, "drop_category"]
+    assert actual.tolist() == expected_activity_1
+
+
+# --------------------------------------------------------------------------- #
+# Heart-rate zone
+# --------------------------------------------------------------------------- #
+def test_heart_rate_zone(features):
+    expected = {
+        1: [
+            "Récupération",
+            "Aérobic (Endur.)",
+            "Aérobic (Puiss.)",
+            "Seuil",
+            "Endurance anaérobie",
+            "Anaérobie (Puiss.)",
+        ],
+        # 142 bpm is the lower (inclusive) bound of the 2nd zone; 220 is above all
+        2: ["Aérobic (Endur.)", "Récupération", OUT_OF_ZONES, "Récupération"],
+    }
+    for activity_id, zones in expected.items():
+        actual = features.loc[features["activity_id"] == activity_id, "heart_rate_zone"]
+        assert actual.tolist() == zones
+
+
+HR_EPSILON = 0.1  # bpm, distance to a bound for the "just below" case
+OUT_OF_ZONES = "Unknown"  # label of a heart rate outside every zone
+ZONE_BOUNDS = list(HEART_RATE_ZONES.values())
+
+
+def _zones_of(make_segments, heart_rate: list[float]) -> list[str]:
+    segments = make_segments([100.0] * len(heart_rate), heart_rate=heart_rate)
+    return build_features(segments, windows_km=(1,))["heart_rate_zone"].tolist()
+
+
+def test_heart_rate_zones_are_contiguous():
+    """Each zone starts exactly where the previous one ends: no gap, no overlap."""
+    upper_bounds = [high for _, high in ZONE_BOUNDS[:-1]]
+    lower_bounds = [low for low, _ in ZONE_BOUNDS[1:]]
+    assert upper_bounds == lower_bounds
+
+
+@pytest.mark.parametrize(
+    ("zone", "bounds"), HEART_RATE_ZONES.items(), ids=list(HEART_RATE_ZONES)
+)
+def test_heart_rate_zone_bounds(make_segments, zone, bounds):
+    """Lower bound, midpoint and just below the upper bound fall in the zone."""
+    low, high = bounds
+    heart_rate = [float(low), (low + high) / 2, high - HR_EPSILON]
+    assert _zones_of(make_segments, heart_rate) == [zone] * len(heart_rate)
+
+
+def test_heart_rate_out_of_zones(make_segments):
+    """Above the last zone, or missing, the heart rate is out of zones."""
+    top = float(max(high for _, high in ZONE_BOUNDS))
+    assert _zones_of(make_segments, [top, np.nan]) == [OUT_OF_ZONES] * 2
+
+
+def test_single_activity_drops_activity_id(dataset):
+    single = dataset.loc[dataset["activity_id"] == 2].drop(columns="activity_id")
+    out = build_features(single, windows_km=(3,))
+    assert "activity_id" not in out.columns
+    assert out["distance_total"].tolist() == [4000] * 4
