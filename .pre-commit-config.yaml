@@ -1,15 +1,22 @@
+# Install once: `poetry install` then `poetry run pre-commit install` (hooks then run on every `git commit`).
+# Run manually on all files: `poetry run pre-commit run --all-files`; skip once with `git commit --no-verify`.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.2.0
     hooks:
+      # Removes trailing spaces at the end of lines.
+      # Modifies the files in place; re-stage them and commit again.
       - id: trailing-whitespace
+      # Ensures every file ends with exactly one newline.
+      # Modifies the files in place; re-stage them and commit again.
       - id: end-of-file-fixer
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.6.9
     hooks:
-      # Code mort "local" : imports / variables inutilisés, redéfinitions,
-      # code commenté. Doit passer AVANT le formatage (recommandation ruff).
+      # Detects "local" dead code: unused imports / variables, redefinitions
+      # and commented-out code, and fixes it automatically when possible.
+      # Must run BEFORE formatting (ruff recommendation).
       - id: ruff
         name: ruff (dead code)
         args:
@@ -18,33 +25,40 @@ repos:
             "--fix",
             "--exit-non-zero-on-fix",
           ]
-      # Docstrings: NumPy convention set in [tool.ruff.lint.pydocstyle]
-      # of pyproject.toml (tests are excluded there).
+      # Checks that public functions and classes have well-formed docstrings.
+      # NumPy convention set in [tool.ruff.lint.pydocstyle] of pyproject.toml
+      # (tests are excluded there).
       - id: ruff
         name: ruff (docstrings)
         args: ["--select=D"]
+      # Formats the code (indentation, quotes, line length...) like Black.
+      # Modifies the files in place; re-stage them and commit again.
       - id: ruff-format
 
   - repo: https://github.com/osprey-oss/deptry.git
     rev: 0.25.0
     hooks:
+      # Checks that imports and pyproject.toml dependencies are consistent:
+      # missing, unused or transitive dependencies are reported.
       - id: deptry
         entry: poetry run deptry .
         args: ["--per-rule-ignores=DEP002=jax|numpyro|netcdf4|nbformat"]
 
   - repo: local
     hooks:
-      # Code mort "global" : fonctions, classes, méthodes, attributs
-      # jamais référencés dans l'ensemble du projet.
+      # Detects "global" dead code: functions, classes, methods and attributes
+      # never referenced anywhere in the project (false positives go in vulture_whitelist.py).
       - id: vulture
         name: vulture (dead code)
         entry: poetry run vulture
         language: system
         types: [python]
         args: [TrailPredictor, pages, app.py, vulture_whitelist.py]
-        pass_filenames: false   # analyse tout le projet, pas seulement les fichiers stagés
+        pass_filenames: false   # analyse the whole project, not only staged files
         require_serial: true
 
+      # Static analysis of the source code: bugs, code smells and style issues.
+      # The docparams plugin also checks that NumPy docstrings document every parameter, return and raise.
       - id: pylint
         name: pylint
         entry: poetry run python -m pylint
@@ -68,9 +82,10 @@ repos:
             "--disable=cyclic-import",
           ]
 
-      # Same checks for tests, minus rules that clash with pytest:
-      # test functions need no docstring, fixtures are injected as
-      # same-named arguments, and fixtures need no Returns section.
+      # Same static analysis as above, applied to the tests/ directory only.
+      # Rules that clash with pytest are disabled: test functions need no
+      # docstring, fixtures are injected as same-named arguments, and
+      # fixtures need no Returns section.
       - id: pylint
         name: pylint (tests)
         entry: poetry run python -m pylint
