@@ -9,7 +9,14 @@ from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 
 from TrailPredictor.activities import RunningActivities
-from TrailPredictor.features import build_features, create_dataset, split_test_train
+from TrailPredictor.features import (
+    build_features,
+    create_dataset,
+    split_test_train,
+    HEART_RATE_ZONES,
+    WINDOWS_KM,
+    HearthRateZone,
+)
 from TrailPredictor.load_fit import ProgressCallback
 from TrailPredictor.speed_columns import TARGETS, Target, add_speed_columns
 from TrailPredictor.utils import COMPUTED_DIR
@@ -91,13 +98,10 @@ class Dataset:
         dataset: pd.DataFrame,
         target: Target = "pace",
     ):
-        # No scaling here: scaling is done in get_preprocess() inside a Pipeline,
-        # so that it is fitted on the training data only (no leakage, no double
-        # scaling when the dataset is split).
         self._data = dataset.copy()
         self._segment_width = infer_segment_width(self._data)
         self._data = self._prepare_raw(self._data)
-        self._data = build_features(self._data)
+        self.build_features()
 
         missing = {
             "speed",
@@ -114,6 +118,41 @@ class Dataset:
         self._features = [
             col for col in self._data.columns if col not in EXCLUDED_COLUMNS
         ]
+
+    def build_features(
+        self,
+        windows_km: tuple = WINDOWS_KM,
+        drop_threshold: float = 2.0,
+        heart_rate_zones: dict[str, tuple[int, int]]
+        | dict[HearthRateZone, tuple[int, int]]
+        | None = None,
+    ) -> None:
+        """Rebuild the features from the raw data.
+
+        This is useful if the feature engineering code has changed, or if
+        new columns have been added to the raw data.
+
+        Parameters
+        ----------
+        windows_km : tuple of float, optional
+            Window lengths in km of the back / front elevation sums. Default
+            is ``WINDOWS_KM``.
+        drop_threshold : float, optional
+            Threshold for classifying a segment as uphill or downhill.
+            Default is 2.0.
+        heart_rate_zones : dict of str to tuple of (int, int), optional
+            Heart-rate zones, mapping each zone label to its ``(low, high)``
+            bounds in bpm. Default is None, meaning ``HEART_RATE_ZONES``.
+        """
+        if heart_rate_zones is None:
+            heart_rate_zones = HEART_RATE_ZONES
+        self._heart_rate_zones = heart_rate_zones
+        self._data = build_features(
+            self._data,
+            windows_km=windows_km,
+            drop_threshold=drop_threshold,
+            heart_rate_zones=heart_rate_zones,
+        )
 
     @property
     def target_name(self) -> Target:
@@ -160,12 +199,31 @@ class Dataset:
             for col in self._features
             if not col.endswith("_ratio") and col not in CATEGORICAL_COLUMNS
         ]
-        to_onehot = [col for col in self._features if col in CATEGORICAL_COLUMNS]
+
+        to_onehot = []
+        categories = []
+        for cat_col in CATEGORICAL_COLUMNS:
+            if cat_col in CATEGORICAL_COLUMNS:
+                to_onehot.append(cat_col)
+
+                if cat_col == "heart_rate_zone":
+                    categories.append(list(self._heart_rate_zones.keys()))
+                elif cat_col == "drop_category":
+                    categories.append(["Flat", "Uphill", "Downhill"])
+                else:
+                    categories.append(list(self._data[cat_col].dropna().unique()))
 
         return ColumnTransformer(
             transformers=[
                 ("scale", StandardScaler(), to_scale),
-                ("onehot", OneHotEncoder(sparse_output=False), to_onehot),
+                (
+                    "onehot",
+                    OneHotEncoder(
+                        sparse_output=False,
+                        categories=categories,
+                    ),
+                    to_onehot,
+                ),
             ],
             remainder="passthrough",  # do not transform other columns
             verbose_feature_names_out=False,  # do not add transformer name to output column names

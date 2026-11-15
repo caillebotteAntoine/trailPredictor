@@ -114,7 +114,7 @@ class PlotActivities(RunningActivities):
 
         Yields
         ------
-        zone : HearthRateZoneLabel
+        zone : HearthRateZone
             Heart-rate zone of the run.
         idx : numpy.ndarray
             Positional indices of the segments of the run.

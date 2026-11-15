@@ -16,7 +16,7 @@ WINDOWS_KM = (1, 3, 5, 10)
 FEATURES_SUFFIXES = ("done", "remaining")
 
 
-HearthRateZoneLabel = Literal[
+HearthRateZone = Literal[
     "Unknown",
     "Récupération",
     "Aérobic (Endur.)",
@@ -25,7 +25,7 @@ HearthRateZoneLabel = Literal[
     "Endurance anaérobie",
     "Anaérobie (Puiss.)",
 ]
-HEART_RATE_ZONES: dict[HearthRateZoneLabel, tuple[int, int]] = {
+HEART_RATE_ZONES: dict[HearthRateZone, tuple[int, int]] = {
     "Récupération": (0, 142),
     "Aérobic (Endur.)": (142, 161),
     "Aérobic (Puiss.)": (161, 170),
@@ -81,10 +81,12 @@ def export_activities(
     act = act[act["distance_km"] > min_distance]
 
     running_activities = []
-    for _, row in act.iterrows():
+    for position, (_, row) in enumerate(act.iterrows()):
         if progress_cb is not None:
-            # change label of the progress bar to show the current activity being processed
-            progress_cb.set_description(f"{row['distance_km']:.2f} km - {row['name']}")
+            # report the current activity being processed
+            progress_cb(
+                position / len(act), f"{row['distance_km']:.2f} km - {row['name']}"
+            )
         else:
             print(f"{row['distance_km']:.2f} km - {row['name']}")
 
@@ -210,6 +212,9 @@ def build_features(
     dataset: pd.DataFrame,
     windows_km: tuple = WINDOWS_KM,
     drop_threshold: float = 2.0,
+    heart_rate_zones: dict[str, tuple[int, int]]
+    | dict[HearthRateZone, tuple[int, int]]
+    | None = None,
 ) -> pd.DataFrame:
     """Build the predictors of each segment.
 
@@ -223,6 +228,9 @@ def build_features(
         ``WINDOWS_KM``.
     drop_threshold : float, optional
         Threshold for classifying a segment as uphill or downhill. Default is 2.0.
+    heart_rate_zones : dict of str to tuple of (int, int), optional
+        Heart-rate zones, mapping each zone label to its ``(low, high)``
+        bounds in bpm. Default is None, meaning ``HEART_RATE_ZONES``.
 
     Returns
     -------
@@ -235,7 +243,10 @@ def build_features(
     See Also
     --------
     TrailPredictor.minetti.cost_of_running : Running energy cost.
+    TrailPredictor.minetti.cost_of_walking : Walking energy cost.
     """
+    if heart_rate_zones is None:
+        heart_rate_zones = HEART_RATE_ZONES
     x = dataset.copy()
 
     if "activity_id" not in x.columns:
@@ -312,9 +323,9 @@ def build_features(
     x["heart_rate_zone"] = np.select(
         [
             x["heart_rate"].between(z[0], z[1], inclusive="left")
-            for z in HEART_RATE_ZONES.values()
+            for z in heart_rate_zones.values()
         ],
-        list(HEART_RATE_ZONES.keys()),
+        list(heart_rate_zones.keys()),
         default="Unknown",
     )
 
