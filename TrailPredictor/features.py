@@ -17,6 +17,7 @@ FEATURES_SUFFIXES = ("done", "remaining")
 
 
 HearthRateZoneLabel = Literal[
+    "Unknown",
     "Récupération",
     "Aérobic (Endur.)",
     "Aérobic (Puiss.)",
@@ -26,9 +27,9 @@ HearthRateZoneLabel = Literal[
 ]
 HEART_RATE_ZONES: dict[HearthRateZoneLabel, tuple[int, int]] = {
     "Récupération": (0, 142),
-    "Aérobic (Endur.)": (142, 160),
-    "Aérobic (Puiss.)": (161, 169),
-    "Seuil": (170, 182),
+    "Aérobic (Endur.)": (142, 161),
+    "Aérobic (Puiss.)": (161, 170),
+    "Seuil": (170, 183),
     "Endurance anaérobie": (183, 189),
     "Anaérobie (Puiss.)": (189, 210),
 }
@@ -314,7 +315,7 @@ def build_features(
             for z in HEART_RATE_ZONES.values()
         ],
         list(HEART_RATE_ZONES.keys()),
-        default="Hors zones",
+        default="Unknown",
     )
 
     if x["activity_id"].nunique() == 1:
