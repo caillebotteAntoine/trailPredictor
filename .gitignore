@@ -21,7 +21,8 @@ __pycache__/
 # IDEs and editors
 .vscode/
 .github/
-.claude/
+.claude/*
+!.claude/CLAUDE.md
 
 # Saved html and csv or data files
 *.html
