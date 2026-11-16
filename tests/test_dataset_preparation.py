@@ -1,10 +1,15 @@
-"""Tests for :func:`TrailPredictor.features.build_features`."""
+"""Tests for :func:`TrailPredictor.features.build_features` and its helpers."""
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from TrailPredictor.features import HEART_RATE_ZONES, build_features
+from TrailPredictor.features import (
+    HEART_RATE_ZONES,
+    OUT_OF_ZONES_LABEL,
+    assign_heart_rate_zones,
+    build_features,
+)
 
 # --------------------------------------------------------------------------- #
 # Valeurs attendues (calculées à la main), par activité
@@ -248,7 +253,7 @@ def test_heart_rate_zone(features):
 
 
 HR_EPSILON = 0.1  # bpm, distance to a bound for the "just below" case
-OUT_OF_ZONES = "Unknown"  # label of a heart rate outside every zone
+OUT_OF_ZONES = OUT_OF_ZONES_LABEL  # label of a heart rate outside every zone
 ZONE_BOUNDS = list(HEART_RATE_ZONES.values())
 
 
@@ -278,6 +283,33 @@ def test_heart_rate_out_of_zones(make_segments):
     """Above the last zone, or missing, the heart rate is out of zones."""
     top = float(max(high for _, high in ZONE_BOUNDS))
     assert _zones_of(make_segments, [top, np.nan]) == [OUT_OF_ZONES] * 2
+
+
+TWO_ZONES = {"low": (0, 150), "high": (150, 200)}
+
+
+def test_assign_heart_rate_zones_matches_build_features(features):
+    zones = assign_heart_rate_zones(features["heart_rate"], HEART_RATE_ZONES)
+
+    pd.testing.assert_series_equal(zones, features["heart_rate_zone"])
+
+
+def test_assign_heart_rate_zones_bounds_and_missing():
+    heart_rate = pd.Series(
+        [0.0, 149.9, 150.0, 199.9, 200.0, np.nan], index=list("abcdef")
+    )
+
+    zones = assign_heart_rate_zones(heart_rate, TWO_ZONES)
+
+    expected = ["low", "low", "high", "high", OUT_OF_ZONES, OUT_OF_ZONES]
+    assert zones.tolist() == expected
+    assert zones.index.equals(heart_rate.index)  # labels aligned on the input
+
+
+def test_assign_heart_rate_zones_empty():
+    zones = assign_heart_rate_zones(pd.Series([], dtype="float64"), TWO_ZONES)
+
+    assert zones.empty
 
 
 def test_single_activity_drops_activity_id(dataset):

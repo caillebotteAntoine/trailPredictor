@@ -33,6 +33,7 @@ HEART_RATE_ZONES: dict[HearthRateZone, tuple[int, int]] = {
     "Endurance anaérobie": (183, 189),
     "Anaérobie (Puiss.)": (189, 210),
 }
+OUT_OF_ZONES_LABEL = "Unknown"  # zone of a missing heart rate, or outside every zone
 
 
 def export_activities(
@@ -208,6 +209,46 @@ def _window_sum(
     )
 
 
+def assign_heart_rate_zones(
+    heart_rate: pd.Series,
+    heart_rate_zones: dict[str, tuple[int, int]]
+    | dict[HearthRateZone, tuple[int, int]],
+) -> pd.Series:
+    """Label each heart rate with its zone.
+
+    It only depends on the heart rate, so the zones can be changed without
+    rebuilding the other features.
+
+    Parameters
+    ----------
+    heart_rate : pandas.Series
+        Heart rate of each segment, in bpm.
+    heart_rate_zones : dict of str to tuple of (int, int)
+        Heart-rate zones, mapping each zone label to its ``[low, high)``
+        bounds in bpm.
+
+    Returns
+    -------
+    pandas.Series
+        Zone label of each segment, with the index of `heart_rate`;
+        ``OUT_OF_ZONES_LABEL`` when the heart rate is missing or outside every
+        zone.
+
+    See Also
+    --------
+    build_features : Builds every predictor, including this one.
+    """
+    labels = np.select(
+        [
+            heart_rate.between(low, high, inclusive="left")
+            for low, high in heart_rate_zones.values()
+        ],
+        list(heart_rate_zones.keys()),
+        default=OUT_OF_ZONES_LABEL,
+    )
+    return pd.Series(labels, index=heart_rate.index, name="heart_rate_zone")
+
+
 def build_features(
     dataset: pd.DataFrame,
     windows_km: tuple = WINDOWS_KM,
@@ -320,14 +361,7 @@ def build_features(
         default="Flat",
     )
 
-    x["heart_rate_zone"] = np.select(
-        [
-            x["heart_rate"].between(z[0], z[1], inclusive="left")
-            for z in heart_rate_zones.values()
-        ],
-        list(heart_rate_zones.keys()),
-        default="Unknown",
-    )
+    x["heart_rate_zone"] = assign_heart_rate_zones(x["heart_rate"], heart_rate_zones)
 
     if x["activity_id"].nunique() == 1:
         x.drop(columns="activity_id", inplace=True)
