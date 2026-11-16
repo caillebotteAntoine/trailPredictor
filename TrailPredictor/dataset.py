@@ -1,6 +1,7 @@
 """Dataset of segmented running activities used to train the models."""
 
-from typing import cast
+import copy
+from typing import Self, cast
 from warnings import warn
 
 import numpy as np
@@ -10,9 +11,9 @@ from sklearn.preprocessing import StandardScaler, OneHotEncoder
 
 from TrailPredictor.activities import RunningActivities
 from TrailPredictor.features import (
+    assign_heart_rate_zones,
     build_features,
     create_dataset,
-    split_test_train,
     HEART_RATE_ZONES,
     WINDOWS_KM,
     HearthRateZone,
@@ -323,6 +324,42 @@ class Dataset:
                 raise ValueError(f"'{feature}' cannot be used as a predictor.")
         self._features = features.copy()
 
+    def with_heart_rate_zones(
+        self,
+        heart_rate_zones: dict[str, tuple[int, int]]
+        | dict[HearthRateZone, tuple[int, int]],
+    ) -> Self:
+        """Return a copy of the dataset with other heart-rate zones.
+
+        Only the ``heart_rate_zone`` column is recomputed: the other features
+        are reused as they are (with the windows and drop threshold they were
+        built with). The dataset is unchanged.
+
+        Parameters
+        ----------
+        heart_rate_zones : dict of str to tuple of (int, int)
+            Heart-rate zones, mapping each zone label to its ``(low, high)``
+            bounds in bpm.
+
+        Returns
+        -------
+        Dataset
+            Copy with the same target and candidate features.
+        """
+        # Shallow copy is enough: the copy gets a new DataFrame (assign), and
+        # the feature list is only ever replaced, never mutated.
+        zoned = copy.copy(self)
+        # private state of a copy of this very class, set before it is returned
+        # pylint: disable-next=protected-access
+        zoned._heart_rate_zones = heart_rate_zones
+        # pylint: disable-next=protected-access
+        zoned._data = self._data.assign(
+            heart_rate_zone=assign_heart_rate_zones(
+                self._data["heart_rate"], heart_rate_zones
+            )
+        )
+        return zoned
+
     @property
     def true_total_time(self) -> pd.Series:
         """Total time of each activity, as the sum of the segment durations."""
@@ -468,6 +505,22 @@ class Dataset:
         )
 
     @property
+    def modeling(self):
+        """Return a modeling interface of the dataset.
+
+        Returns
+        -------
+        Modeling
+            Factory of the models trained on this dataset, which is shared,
+            not copied.
+        """
+        from TrailPredictor.modeling.models import (  # pylint: disable=import-outside-toplevel
+            Modeling,
+        )
+
+        return Modeling(self)
+
+    @property
     def plot(self):
         """Return a plotting interface of the dataset.
 
@@ -514,25 +567,6 @@ class Dataset:
             else None
         )
         return RunningActivities(activity_data, prediction=prediction)
-
-    def split_test_train(self):
-        """Split the dataset into a training and a test set by activity.
-
-        Returns
-        -------
-        train : Dataset
-            Training activities, with the same target.
-        test : Dataset
-            Test activities, with the same target.
-
-        See Also
-        --------
-        TrailPredictor.features.split_test_train : Underlying split.
-        """
-        train_data, test_data = split_test_train(self._data)
-        return Dataset(train_data, self.target_name), Dataset(
-            test_data, self.target_name
-        )
 
     @staticmethod
     def _prepare_raw(raw: pd.DataFrame) -> pd.DataFrame:

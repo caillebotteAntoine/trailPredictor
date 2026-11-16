@@ -4,3 +4,4 @@ from pathlib import Path
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 COMPUTED_DIR = DATA_DIR / "computed"
+MODELS_DIR = COMPUTED_DIR / "models"
