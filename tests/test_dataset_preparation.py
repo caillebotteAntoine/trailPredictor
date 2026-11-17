@@ -164,6 +164,30 @@ def test_ratios_are_between_0_and_1(features, col):
     assert features[col].between(0, 1).all()
 
 
+@pytest.mark.parametrize(
+    ("altitude", "zero_total_feature"),
+    [
+        ([100, 110, 120, 130], "altitude_drop_neg"),  # climbs only
+        ([130, 120, 110, 100], "altitude_drop_pos"),  # descends only
+        ([100, 100, 100, 100], None),  # flat: both totals are zero
+    ],
+)
+def test_ratios_are_zero_when_total_is_zero(
+    make_segments, make_dataset, altitude, zero_total_feature
+):
+    """No 0 / 0 = NaN when an activity never climbs or never descends."""
+    out = build_features(make_dataset({1: make_segments(altitude)}), windows_km=(3,))
+    assert np.isfinite(out[RATIO_COLUMNS].to_numpy(dtype=float)).all()
+    zero_features = (
+        ["altitude_drop_pos", "altitude_drop_neg"]
+        if zero_total_feature is None
+        else [zero_total_feature]
+    )
+    for feature in zero_features:
+        for suffix in ("done", "remaining"):
+            np.testing.assert_allclose(out[f"{feature}_{suffix}_ratio"], 0.0)
+
+
 # --------------------------------------------------------------------------- #
 # Fenêtres back / front
 # --------------------------------------------------------------------------- #

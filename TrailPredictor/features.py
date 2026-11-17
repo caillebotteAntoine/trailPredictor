@@ -322,11 +322,20 @@ def build_features(
     )
 
     # => ratio of each variable for "done" and "remaining" features
-    # in order to remove the effect of the total value of each variable for each activity
+    # in order to remove the effect of the total value of each variable for each activity.
+    # An activity that never climbs (or never descends) has a zero total: its
+    # ratios are set to 0 instead of 0 / 0 = NaN.
     for feature in col_features:
+        total = x[f"{feature}_total"].to_numpy(dtype=np.float64)
+        has_total = ~np.isclose(total, 0.0)
         for suffix in FEATURES_SUFFIXES:
             col = f"{feature}_{suffix}"
-            x[f"{col}_ratio"] = x[col] / x[f"{feature}_total"]
+            x[f"{col}_ratio"] = np.divide(
+                x[col].to_numpy(dtype=np.float64),
+                total,
+                out=np.zeros_like(total),
+                where=has_total,
+            )
 
     # => sum of each variable for the previous and next k segments
     x_grp = x.groupby("activity_id")
