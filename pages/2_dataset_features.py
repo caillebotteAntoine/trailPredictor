@@ -20,6 +20,7 @@ import streamlit as st
 
 from TrailPredictor.dataset import Dataset
 from TrailPredictor.plot import PlotDataset
+from TrailPredictor.speed_columns import TARGETS, Target
 
 SELECTION_IN_SIDEBAR = False
 
@@ -43,11 +44,12 @@ FILTER_KEYS = {
     "dataset_filter_max_missing": 100,
 }
 
-# Spearman est invariant par transformation monotone : le classement des
-# features est identique pour pace, log_pace, speed et log_speed, seul le signe
-# change. On calcule sur "pace" et on inverse le signe pour l'exprimer par
-# rapport à la vitesse (+ : la feature va avec une allure plus rapide).
-SPEED_SIGN = -1.0
+# La corrélation de Spearman est calculée avec la cible choisie, puis son
+# signe est inversé pour les cibles de type allure (« pace ») afin de toujours
+# l'exprimer par rapport à la vitesse (+ : la feature va avec une allure plus
+# rapide).
+PACE_SIGN = -1.0
+SPEED_SIGN = 1.0
 
 TABLE_COLUMNS = ["Nom", "Spearman", "Manquantes (%)", "Groupe"]
 
@@ -98,9 +100,12 @@ def _feature_group(name: str) -> str:
 
 @st.cache_data
 def correlation_table(
-    min_distance: int, max_distance: int, segment_width: int
+    min_distance: int, max_distance: int, segment_width: int, target_name: Target
 ) -> pd.DataFrame:
-    """Compute the Spearman correlation of each numeric feature with the pace.
+    """Compute the Spearman correlation of each numeric feature with the target.
+
+    The sign is flipped for pace-like targets, so a positive correlation always
+    means a faster running.
 
     Parameters
     ----------
@@ -110,6 +115,8 @@ def correlation_table(
         Maximum activity distance in km.
     segment_width : int
         Segment length in metres.
+    target_name : Target
+        Target the features are correlated with.
 
     Returns
     -------
@@ -118,8 +125,7 @@ def correlation_table(
         sorted by decreasing absolute correlation (NaN last).
     """
     dataset = load_dataset(min_distance, max_distance, segment_width)
-    plot = dataset.plot
-    plot.target = "pace"
+    plot = dataset.with_target(target_name).plot
 
     target = pd.to_numeric(plot.target, errors="coerce")
     target = target.replace([np.inf, -np.inf], np.nan)
@@ -135,7 +141,8 @@ def correlation_table(
         .replace([np.inf, -np.inf], np.nan)
     )
     frame["__target__"] = target
-    rho = frame.corr(method="spearman")["__target__"].drop("__target__") * SPEED_SIGN
+    sign = PACE_SIGN if target_name.endswith("pace") else SPEED_SIGN
+    rho = frame.corr(method="spearman")["__target__"].drop("__target__") * sign
 
     table = pd.DataFrame(
         {
@@ -455,11 +462,12 @@ def main() -> None:
     segment_width = st.sidebar.number_input(
         "Taille des segments (m)", min_value=100, max_value=5000, value=1000, step=100
     )
+    target_name = st.sidebar.selectbox("Cible", TARGETS, index=0)
     params = (int(min_distance), int(max_distance), int(segment_width))
     try:
-        dataset = load_dataset(*params)
+        dataset = load_dataset(*params).with_target(target_name)
         plot = dataset.plot
-        correlations = correlation_table(*params)
+        correlations = correlation_table(*params, target_name)
     # UI boundary: any loading failure is shown instead of crashing the page.
     except Exception as error:  # pylint: disable=broad-exception-caught
         st.error(f"Impossible de charger le dataset : {error}")
@@ -468,9 +476,7 @@ def main() -> None:
     st.session_state[DATASET_KEY] = dataset
     st.session_state[DATASET_PARAMS_KEY] = params
 
-    st.sidebar.write(
-        f"Cible courante : `{plot.target_name}` · {len(dataset.data)} lignes"
-    )
+    st.sidebar.caption(f"{len(dataset.data)} lignes")
 
     # Le panneau de sélection est rendu AVANT les graphiques : ils lisent la
     # sélection à jour dans le même run.
