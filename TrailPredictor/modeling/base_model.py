@@ -97,8 +97,9 @@ class BaseModeling[ConfigT: ModelConfig](ABC):
     def save_result(self) -> Path:
         """Save the result as CSV, and its metadata as JSON next to it.
 
-        The JSON file holds the dataset key and the configuration, so a
-        result can be traced back to the data it was computed on.
+        The JSON file holds the dataset name (null if it has none), the
+        dataset key and the configuration, so a result can be traced back to
+        the data it was computed on.
 
         Returns
         -------
@@ -116,6 +117,7 @@ class BaseModeling[ConfigT: ModelConfig](ABC):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.result.to_csv(path, index=False)
         metadata = {
+            "dataset_name": self._dataset.name,
             "dataset_key": self._dataset.key,
             "config": self._config.model_dump(mode="json"),
         }

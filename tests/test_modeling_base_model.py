@@ -15,6 +15,8 @@ from TrailPredictor.dataset import Dataset
 from TrailPredictor.modeling.base_model import BaseModeling
 from TrailPredictor.modeling.config import ModelConfig
 
+DATASET_NAME = "dataset_40_60_1000"
+
 
 class LinearModeling(BaseModeling[ModelConfig]):
     """Smallest concrete model."""
@@ -66,9 +68,24 @@ def test_save_and_reload(model: LinearModeling, tmp_path: Path) -> None:
     assert reloaded.result is not None
     pd.testing.assert_frame_equal(reloaded.result, model.result)
     assert json.loads(path.with_suffix(".json").read_text()) == {
+        "dataset_name": None,
         "dataset_key": model.dataset.key,
         "config": {"seed": SEED, "n_splits": N_SPLITS, "test_size": TEST_SIZE},
     }
+
+
+def test_saved_metadata_holds_dataset_name(
+    dataset: pd.DataFrame, model_config: ModelConfig, tmp_path: Path
+) -> None:
+    in_zone = dataset.assign(heart_rate=DEFAULT_HEART_RATE)
+    model = LinearModeling(
+        Dataset(in_zone, name=DATASET_NAME), model_config, models_dir=tmp_path
+    )
+    model.result = pd.DataFrame({"rmse": [0.5]})
+
+    metadata = json.loads(model.save_result().with_suffix(".json").read_text())
+
+    assert metadata["dataset_name"] == DATASET_NAME
 
 
 def test_other_config_does_not_reload(model: LinearModeling, tmp_path: Path) -> None:
