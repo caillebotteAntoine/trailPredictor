@@ -350,7 +350,7 @@ def build_features(
     x["pause"] = (x["speed"] < 1.0) & (x["running_cost"] < 1.5)
 
     # removing done because it is redundant with distance
-    x.drop(columns="distance_done", inplace=True)
+    x = x.drop(columns="distance_done")
 
     x["drop_category"] = np.select(
         [
@@ -364,6 +364,6 @@ def build_features(
     x["heart_rate_zone"] = assign_heart_rate_zones(x["heart_rate"], heart_rate_zones)
 
     if x["activity_id"].nunique() == 1:
-        x.drop(columns="activity_id", inplace=True)
+        x = x.drop(columns="activity_id")
 
     return x

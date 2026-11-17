@@ -176,7 +176,7 @@ class RunningActivities:
             x["altitude"] = x["enhanced_altitude"]
 
         if (x["enhanced_altitude"] == x["altitude"]).all():
-            x.drop(columns=["enhanced_altitude"], inplace=True)
+            x = x.drop(columns=["enhanced_altitude"])
         else:
             warn("enhanced_altitude is not equal to altitude, using enhanced_altitude")
             x = x.drop(columns=["altitude"]).rename(
