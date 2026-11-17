@@ -16,8 +16,12 @@ from TrailPredictor.modeling.heart_rate import (
     REFERENCE_CUTS,
     HeartRateConfig,
     ModelingHeartRate,
+    OneSeSelection,
     cuts_to_zones,
+    list_saved_results,
+    select_n_zones_one_se,
     suggest_cuts,
+    summarize_zone_counts,
 )
 from TrailPredictor.modeling.models import Modeling
 
@@ -159,6 +163,24 @@ def test_optimize_zones_result(
     assert completed["cuts"].map(len).add(1).equals(completed["n_zones"])
 
 
+def test_optimize_zones_reports_progress(
+    model: ModelingHeartRate, config: HeartRateConfig
+) -> None:
+    reports: list[tuple[float, str]] = []
+
+    model.optimize_zones(
+        progress_cb=lambda fraction, text: reports.append((fraction, text))
+    )
+
+    fractions = [fraction for fraction, _ in reports]
+    assert fractions == sorted(fractions)
+    assert fractions[-1] == pytest.approx(1.0)
+    assert all(0.0 <= fraction <= 1.0 for fraction in fractions)
+    assert (
+        reports[-1][1] == f"N=3: {config.n_trials}/{config.n_trials} completed trials"
+    )
+
+
 def test_optimize_zones_is_reproducible(
     dataset: pd.DataFrame, config: HeartRateConfig, tmp_path: Path
 ) -> None:
@@ -204,3 +226,138 @@ def test_cuts_above_max_last_cut_are_pruned(
     pruned = model.result.loc[model.result["state"] == "PRUNED"]
     assert pruned["cuts"].map(lambda cuts: cuts[-1] > 160).all()
     assert pruned["rmse"].isna().all()
+
+
+# --- list_saved_results
+
+
+def test_list_saved_results_empty_dir(tmp_path: Path) -> None:
+    assert not list_saved_results(tmp_path)
+
+
+def test_list_saved_results_finds_saved_model(
+    model: ModelingHeartRate, tmp_path: Path
+) -> None:
+    model.result = pd.DataFrame({"n_zones": [2]})
+    model.save_result()
+
+    saved = list_saved_results(tmp_path)
+
+    assert len(saved) == 1
+    assert saved[0].target_name == model.dataset.target_name
+    assert saved[0].config == model.config
+    assert saved[0].result_path == model.result_path
+
+
+def test_list_saved_results_skips_invalid_files(
+    model: ModelingHeartRate, tmp_path: Path
+) -> None:
+    model.result = pd.DataFrame({"n_zones": [2]})
+    model.save_result()
+    target_dir = model.result_path.parent
+    (target_dir / "no_csv.json").write_text(model.config.model_dump_json())
+    (target_dir / "bad.json").write_text('{"unknown_field": 1}')
+    (target_dir / "bad.csv").write_text("n_zones\n2\n")
+    unknown_target = tmp_path / ModelingHeartRate.name / "not_a_target"
+    unknown_target.mkdir()
+    (unknown_target / "key.json").write_text(model.config.model_dump_json())
+    (unknown_target / "key.csv").write_text("n_zones\n2\n")
+
+    saved = list_saved_results(tmp_path)
+
+    assert [s.result_path for s in saved] == [model.result_path]
+
+
+# --- summarize_zone_counts
+
+
+@pytest.fixture
+def trials() -> pd.DataFrame:
+    """Trials of 2 and 3 zones, with a pruned trial for N=3."""
+    return pd.DataFrame(
+        {
+            "n_zones": [2, 2, 3, 3, 3],
+            "state": ["COMPLETE", "COMPLETE", "COMPLETE", "PRUNED", "COMPLETE"],
+        }
+    )
+
+
+@pytest.fixture
+def best_trials() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "trial_number": [1, 4],
+            "cuts": [[150], [140, 160]],
+            "rmse": [0.55, 0.5],
+            "rmse_se": [0.1, 0.25],
+            "extra": ["dropped", "dropped"],
+        },
+        index=pd.Index([2, 3], name="n_zones"),
+    )
+
+
+def test_summarize_zone_counts(trials: pd.DataFrame, best_trials: pd.DataFrame) -> None:
+    summary = summarize_zone_counts(trials, best_trials)
+
+    expected = best_trials.drop(columns="extra").assign(
+        n_complete=[2, 2], n_pruned=[0, 1]
+    )
+    pd.testing.assert_frame_equal(summary, expected)
+
+
+def test_summarize_zone_counts_with_reference(
+    trials: pd.DataFrame, best_trials: pd.DataFrame
+) -> None:
+    summary = summarize_zone_counts(trials, best_trials, reference_rmse=0.5)
+
+    np.testing.assert_allclose(summary["delta_vs_reference"], [0.05, 0.0])
+
+
+def test_summarize_zone_counts_empty() -> None:
+    trials = pd.DataFrame({"n_zones": pd.Series(dtype=int), "state": []})
+    best_trials = pd.DataFrame(
+        columns=["trial_number", "cuts", "rmse", "rmse_se"],
+        index=pd.Index([], name="n_zones"),
+    )
+
+    summary = summarize_zone_counts(trials, best_trials)
+
+    assert summary.empty
+    assert {"n_complete", "n_pruned"} <= set(summary.columns)
+
+
+# --- select_n_zones_one_se
+
+
+def _summary(rmse: list[float], rmse_se: list[float]) -> pd.DataFrame:
+    index = pd.Index(range(2, 2 + len(rmse)), name="n_zones")
+    return pd.DataFrame({"rmse": rmse, "rmse_se": rmse_se}, index=index)
+
+
+@pytest.mark.parametrize(
+    ("rmse", "rmse_se", "expected"),
+    [
+        # N=2 within one SE of the best N=3: the simpler model wins
+        ([0.55, 0.5, 0.6], [0.1, 0.25, 0.1], OneSeSelection(2, 3, 0.75)),
+        # N=2 above the threshold: the best N is kept
+        ([1.0, 0.5, 0.6], [0.1, 0.25, 0.1], OneSeSelection(3, 3, 0.75)),
+        # missing SE counts as 0
+        ([0.55, 0.5], [0.1, np.nan], OneSeSelection(3, 3, 0.5)),
+        # missing RMSE is ignored
+        ([np.nan, 0.5], [0.1, 0.25], OneSeSelection(3, 3, 0.75)),
+    ],
+)
+def test_select_n_zones_one_se(
+    rmse: list[float], rmse_se: list[float], expected: OneSeSelection
+) -> None:
+    selection = select_n_zones_one_se(_summary(rmse, rmse_se))
+
+    assert selection.n_zones == expected.n_zones
+    assert selection.best_n_zones == expected.best_n_zones
+    assert selection.threshold == pytest.approx(expected.threshold)
+
+
+@pytest.mark.parametrize("rmse", [[], [np.nan]])
+def test_select_n_zones_one_se_without_rmse_raises(rmse: list[float]) -> None:
+    with pytest.raises(ValueError, match="finite RMSE"):
+        select_n_zones_one_se(_summary(rmse, [np.nan] * len(rmse)))

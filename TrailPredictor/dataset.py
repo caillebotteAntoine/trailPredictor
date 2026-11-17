@@ -461,6 +461,32 @@ class Dataset:  # pylint: disable=too-many-public-methods
         )
         return zoned
 
+    def with_target(self, target: Target) -> Self:
+        """Return a copy of the dataset with another target.
+
+        The dataset is unchanged, so a shared (e.g. cached) dataset can be
+        used with several targets.
+
+        Parameters
+        ----------
+        target : Target
+            New target name.
+
+        Returns
+        -------
+        Dataset
+            Copy sharing the same data, with `target` as target.
+
+        Raises
+        ------
+        ValueError
+            If `target` is not one of ``TARGETS``.
+        """
+        # Shallow copy is enough: the target setter only replaces the name.
+        retargeted = copy.copy(self)
+        retargeted.target = target
+        return retargeted
+
     @property
     def true_total_time(self) -> pd.Series:
         """Total time of each activity, as the sum of the segment durations."""
