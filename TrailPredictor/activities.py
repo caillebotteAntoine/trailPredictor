@@ -198,15 +198,29 @@ class RunningActivities:
         # aggregate by segments of segment_width meters
         last_timestamp = x["timestamp"].max()
         x["segment"] = (x["distance"] // segment_width).astype(int)
+
+        def segment_end(distance: pd.Series) -> float:
+            """Upper bound of the segment containing the given distances.
+
+            Parameters
+            ----------
+            distance : pandas.Series
+                Cumulative distances of the records of one segment, in metres.
+
+            Returns
+            -------
+            float
+                End of the segment, in metres.
+            """
+            return (distance.max() // segment_width + 1) * segment_width
+
         x = (
             x.groupby("segment")
             .agg(
                 {
                     # aggregate the features for each segment
                     "timestamp": "first",
-                    "distance": lambda x: (
-                        (x.max() // segment_width + 1) * segment_width
-                    ),
+                    "distance": segment_end,
                     # mean of the features for each segment
                     "heart_rate": "mean",
                     "altitude": "mean",

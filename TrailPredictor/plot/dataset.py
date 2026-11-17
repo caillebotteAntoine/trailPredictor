@@ -66,9 +66,9 @@ class PlotDataset(Dataset):
         current_target_name = self.target_name
         figs = {}
         try:
-            for col in TARGETS:
-                self.target = col
-                figs[col] = plot_fct(**kwargs)
+            for target in TARGETS:
+                self.target = target
+                figs[target] = plot_fct(**kwargs)
         finally:
             self.target = current_target_name
 

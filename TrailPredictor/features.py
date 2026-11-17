@@ -193,20 +193,38 @@ def _window_sum(
     The current segment is excluded; at the edges, the available segments
     are summed.
     """
-    if direction == "back":
-        return s.transform(
-            lambda values: values.shift(1).rolling(k, min_periods=1).sum().fillna(0.0)
-        )
-    return s.transform(
-        lambda values: (
-            values.iloc[::-1]
-            .shift(1)
-            .rolling(k, min_periods=1)
-            .sum()
-            .iloc[::-1]
-            .fillna(0.0)
-        )
-    )
+
+    def back_sum(values: pd.Series) -> pd.Series:
+        """Sum the `k` previous values, excluding the current one.
+
+        Parameters
+        ----------
+        values : pandas.Series
+            Values of one activity, ordered by segment.
+
+        Returns
+        -------
+        pandas.Series
+            Backward window sums, 0.0 for the first value.
+        """
+        return values.shift(1).rolling(k, min_periods=1).sum().fillna(0.0)
+
+    def front_sum(values: pd.Series) -> pd.Series:
+        """Sum the `k` next values, excluding the current one.
+
+        Parameters
+        ----------
+        values : pandas.Series
+            Values of one activity, ordered by segment.
+
+        Returns
+        -------
+        pandas.Series
+            Forward window sums, 0.0 for the last value.
+        """
+        return back_sum(values.iloc[::-1]).iloc[::-1]
+
+    return s.transform(back_sum if direction == "back" else front_sum)
 
 
 def assign_heart_rate_zones(

@@ -454,7 +454,7 @@ class Dataset:
 
         eps = 1e-6  # avoid dividing by 0 if a model predicts a null / negative value
 
-        target_name = self._target_name
+        target_name: str = self._target_name
         if target_name.startswith("log_"):
             predicted = np.exp(predicted)
             target_name = target_name[4:]  # remove the "log_" prefix

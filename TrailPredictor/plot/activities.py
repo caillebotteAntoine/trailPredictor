@@ -1,7 +1,7 @@
 """Plotly figures for a single running activity."""
 
-from collections.abc import Callable
-from typing import Any, Literal
+from collections.abc import Callable, Iterator
+from typing import Any, Literal, get_args
 
 import numpy as np
 import numpy.typing as npt
@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from TrailPredictor.activities import RunningActivities
-from TrailPredictor.features import HEART_RATE_ZONES, build_features
+from TrailPredictor.features import HEART_RATE_ZONES, HearthRateZone, build_features
 from TrailPredictor.plot._common import TARGETS_UNITS, _base_layout
 from TrailPredictor.speed_columns import format_pace
 
@@ -74,7 +74,9 @@ class PlotActivities(RunningActivities):
         return TARGETS_UNITS[self.target_name]
 
     @property
-    def iter_drop_categories(self):
+    def iter_drop_categories(
+        self,
+    ) -> Iterator[tuple[DropCategory, npt.NDArray[np.intp], pd.DataFrame]]:
         """Iterate over the contiguous runs of each drop category.
 
         Each run is extended by one segment on each side so that the drawn
@@ -91,7 +93,7 @@ class PlotActivities(RunningActivities):
         """
         n = len(self._data)
 
-        for category in DropCategory.__args__:
+        for category in get_args(DropCategory):
             indexes = np.flatnonzero(self._data["drop_category"] == category)
             if indexes.size == 0:
                 continue
@@ -100,13 +102,15 @@ class PlotActivities(RunningActivities):
                 # Extend the segment by one point on each side (overlap with neighbors)
                 start = max(segment[0] - 1, 0)
                 stop = min(segment[-1] + 1, n - 1)
-                idx: np.ndarray = np.arange(start, stop + 1)
+                idx = np.arange(start, stop + 1)
                 if len(idx) < 2:
                     continue
 
                 yield (category, idx, self._data.iloc[idx])
 
-    def iter_heart_rate_zones(self):
+    def iter_heart_rate_zones(
+        self,
+    ) -> Iterator[tuple[HearthRateZone, npt.NDArray[np.intp], pd.DataFrame]]:
         """Iterate over the contiguous runs of each heart-rate zone.
 
         Each run is extended by one segment on each side so that the drawn
@@ -130,7 +134,7 @@ class PlotActivities(RunningActivities):
                 # Extend the segment by one point on each side (overlap with neighbors)
                 start = max(segment[0] - 1, 0)
                 stop = min(segment[-1] + 1, len(self._data) - 1)
-                idx: np.ndarray = np.arange(start, stop + 1)
+                idx = np.arange(start, stop + 1)
                 if len(idx) < 2:
                     continue
 
