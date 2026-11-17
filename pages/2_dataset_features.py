@@ -23,6 +23,11 @@ from TrailPredictor.plot import PlotDataset
 
 SELECTION_IN_SIDEBAR = False
 
+# Dataset loaded on this page, reused by the other pages (e.g. heart-rate
+# zones); keep in sync with pages/3_heart_rate_zone.py.
+DATASET_KEY = "app_dataset"
+DATASET_PARAMS_KEY = "app_dataset_params"
+
 # Streamlit récent : remplacer par {"width": "stretch"} si l'avertissement de
 # dépréciation de `use_container_width` gêne.
 STRETCH: dict[str, Any] = {"use_container_width": True}
@@ -459,6 +464,9 @@ def main() -> None:
     except Exception as error:  # pylint: disable=broad-exception-caught
         st.error(f"Impossible de charger le dataset : {error}")
         return
+
+    st.session_state[DATASET_KEY] = dataset
+    st.session_state[DATASET_PARAMS_KEY] = params
 
     st.sidebar.write(
         f"Cible courante : `{plot.target_name}` · {len(dataset.data)} lignes"

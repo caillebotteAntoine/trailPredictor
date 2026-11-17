@@ -72,7 +72,9 @@ def infer_segment_width(data: pd.DataFrame) -> float:
     return float(width)
 
 
-class Dataset:
+# Central data object of the package: its public API (data access, targets,
+# feature variants, predictions) legitimately exceeds the default limit.
+class Dataset:  # pylint: disable=too-many-public-methods
     """Segments of several activities with their features and target.
 
     Parameters
@@ -387,6 +389,32 @@ class Dataset:
             )
         )
         return zoned
+
+    def with_target(self, target: Target) -> Self:
+        """Return a copy of the dataset with another target.
+
+        The dataset is unchanged, so a shared (e.g. cached) dataset can be
+        used with several targets.
+
+        Parameters
+        ----------
+        target : Target
+            New target name.
+
+        Returns
+        -------
+        Dataset
+            Copy sharing the same data, with `target` as target.
+
+        Raises
+        ------
+        ValueError
+            If `target` is not one of ``TARGETS``.
+        """
+        # Shallow copy is enough: the target setter only replaces the name.
+        retargeted = copy.copy(self)
+        retargeted.target = target
+        return retargeted
 
     @property
     def true_total_time(self) -> pd.Series:

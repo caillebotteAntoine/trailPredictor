@@ -111,3 +111,19 @@ def test_split_test_train_keeps_activities_whole(
     assert not train_ids & test_ids
     assert train_ids | test_ids == set(activity_ids)
     assert train.target_name == test.target_name == "speed"
+
+
+# --- with_target
+
+
+def test_with_target_returns_retargeted_copy(ds: Dataset) -> None:
+    retargeted = ds.with_target("log_speed")
+
+    assert retargeted.target_name == "log_speed"
+    assert ds.target_name == "pace"
+    pd.testing.assert_series_equal(retargeted.target, ds.data["log_speed"])
+
+
+def test_with_target_invalid_target_raises(ds: Dataset) -> None:
+    with pytest.raises(ValueError, match="Invalid target"):
+        ds.with_target("not_a_target")  # type: ignore[arg-type]

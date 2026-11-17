@@ -2,10 +2,11 @@
 
 import logging
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from functools import partial
 from itertools import pairwise
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, ClassVar, Self
+from typing import TYPE_CHECKING, Annotated, ClassVar, NamedTuple, Self, cast
 
 import numpy as np
 import optuna
@@ -13,13 +14,20 @@ import pandas as pd
 from optuna.study import MaxTrialsCallback
 from optuna.study import Study
 from optuna.trial import BaseTrial, FrozenTrial, TrialState
-from pydantic import AfterValidator, Field, PositiveInt, model_validator
+from pydantic import (
+    AfterValidator,
+    Field,
+    PositiveInt,
+    ValidationError,
+    model_validator,
+)
 from sklearn.linear_model import LinearRegression
 
 from TrailPredictor.dataset import Dataset
 from TrailPredictor.load_fit import ProgressCallback
 from TrailPredictor.modeling.base_model import BaseModeling
 from TrailPredictor.modeling.config import ModelConfig
+from TrailPredictor.speed_columns import TARGETS, Target
 from TrailPredictor.utils import MODELS_DIR
 
 if TYPE_CHECKING:
@@ -30,6 +38,7 @@ logger = logging.getLogger(__name__)
 HR_FLOOR_BPM, HR_CEIL_BPM = 0, 250  # extreme values of the heart rate (bpm)
 MIN_ZONES = 2  # at least one cut
 REFERENCE_CUTS = [142, 161, 170, 183]
+TRIAL_STATES = ["COMPLETE", "PRUNED"]  # trial states counted in the summary
 
 
 def cuts_to_zones(cuts: Sequence[int]) -> dict[str, tuple[int, int]]:
@@ -366,3 +375,173 @@ class ModelingHeartRate(BaseModeling[HeartRateConfig]):
         )
         self.save_result()
         return studies
+
+
+@dataclass(frozen=True, slots=True)
+class SavedHeartRateResult:
+    """Saved result of a heart-rate zone optimisation.
+
+    Parameters
+    ----------
+    target_name : Target
+        Target the RMSE was computed on.
+    config : HeartRateConfig
+        Configuration of the optimisation, read from its JSON dump.
+    result_path : pathlib.Path
+        CSV file of the trials.
+    """
+
+    target_name: Target
+    config: HeartRateConfig
+    result_path: Path
+
+
+def list_saved_results(models_dir: Path = MODELS_DIR) -> list[SavedHeartRateResult]:
+    """List the saved heart-rate zone optimisations.
+
+    A result is listed when its CSV file and its JSON configuration both
+    exist under ``<models_dir>/heart_rate/<target>/``. Configurations that
+    cannot be read (e.g. saved by an older version of the code) are skipped
+    and logged.
+
+    Parameters
+    ----------
+    models_dir : pathlib.Path, optional
+        Root directory of the saved results. Default is ``MODELS_DIR``.
+
+    Returns
+    -------
+    list of SavedHeartRateResult
+        Saved results, sorted by target then configuration key; empty when
+        nothing is saved.
+
+    See Also
+    --------
+    BaseModeling.save_result : Writes the CSV and JSON files.
+    """
+    saved = []
+    # loop over the saved files, not over the data
+    for config_path in sorted((models_dir / ModelingHeartRate.name).glob("*/*.json")):
+        result_path = config_path.with_suffix(".csv")
+        target_name = config_path.parent.name
+        if not result_path.exists() or target_name not in TARGETS:
+            logger.warning("Skipping %s: no CSV result or unknown target", config_path)
+            continue
+        try:
+            config = HeartRateConfig.model_validate_json(config_path.read_text())
+        except ValidationError:
+            logger.exception("Skipping %s: invalid configuration", config_path)
+            continue
+        saved.append(
+            SavedHeartRateResult(cast(Target, target_name), config, result_path)
+        )
+    return saved
+
+
+def summarize_zone_counts(
+    trials: pd.DataFrame,
+    best_trials: pd.DataFrame,
+    reference_rmse: float | None = None,
+) -> pd.DataFrame:
+    """Summarise the best trial and the trial counts of each zone count.
+
+    Parameters
+    ----------
+    trials : pandas.DataFrame
+        Every trial, with at least the columns ``n_zones`` and ``state``,
+        as ``ModelingHeartRate.result``.
+    best_trials : pandas.DataFrame
+        Best completed trial of each zone count, indexed by ``n_zones``, with
+        the columns ``trial_number``, ``cuts``, ``rmse`` and ``rmse_se``, as
+        ``PlotHeartRate.best_trials``.
+    reference_rmse : float or None, optional
+        RMSE of the reference zones; adds a ``delta_vs_reference`` column
+        when given. Default is None.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Indexed by ``n_zones``, with the columns ``trial_number``, ``cuts``,
+        ``rmse``, ``rmse_se``, ``n_complete``, ``n_pruned`` and, if
+        `reference_rmse` is given, ``delta_vs_reference``.
+    """
+    counts = (
+        trials.groupby(["n_zones", "state"])
+        .size()
+        .unstack("state")
+        .reindex(index=best_trials.index, columns=TRIAL_STATES)
+        .fillna(0)
+        .astype(int)
+    )
+    summary = best_trials[["trial_number", "cuts", "rmse", "rmse_se"]].assign(
+        n_complete=counts["COMPLETE"],
+        n_pruned=counts["PRUNED"],
+    )
+    if reference_rmse is not None:
+        summary = summary.assign(delta_vs_reference=summary["rmse"] - reference_rmse)
+    return summary
+
+
+class OneSeSelection(NamedTuple):
+    """Number of zones chosen by the one-standard-error rule.
+
+    Attributes
+    ----------
+    n_zones : int
+        Smallest number of zones whose RMSE is below `threshold`.
+    best_n_zones : int
+        Number of zones with the lowest RMSE.
+    threshold : float
+        Lowest RMSE plus its standard error.
+    """
+
+    n_zones: int
+    best_n_zones: int
+    threshold: float
+
+
+def select_n_zones_one_se(summary: pd.DataFrame) -> OneSeSelection:
+    """Choose the number of zones with the one-standard-error rule.
+
+    The simplest model (fewest zones) whose RMSE is within one standard
+    error of the lowest RMSE is kept.
+
+    Parameters
+    ----------
+    summary : pandas.DataFrame
+        Indexed by ``n_zones``, with the columns ``rmse`` and ``rmse_se``,
+        as returned by `summarize_zone_counts`.
+
+    Returns
+    -------
+    OneSeSelection
+        Chosen and best numbers of zones, and the RMSE threshold. A missing
+        standard error counts as 0.
+
+    Raises
+    ------
+    ValueError
+        If `summary` has no finite RMSE.
+
+    Examples
+    --------
+    >>> summary = pd.DataFrame(
+    ...     {"rmse": [0.55, 0.5, 0.6], "rmse_se": [0.1, 0.25, 0.1]},
+    ...     index=pd.Index([2, 3, 4], name="n_zones"),
+    ... )
+    >>> select_n_zones_one_se(summary)
+    OneSeSelection(n_zones=2, best_n_zones=3, threshold=0.75)
+    """
+    rmse = summary["rmse"].to_numpy(dtype=np.float64)
+    rmse_se = summary["rmse_se"].to_numpy(dtype=np.float64)
+    n_zones = summary.index.to_numpy(dtype=np.int64)
+    if np.isnan(rmse).all():  # also true when empty
+        raise ValueError("No trial with a finite RMSE to select from")
+    best = int(np.nanargmin(rmse))
+    threshold = float(rmse[best] + np.nan_to_num(rmse_se[best]))
+    # NaN RMSE compare False, so they are never selected
+    return OneSeSelection(
+        n_zones=int(n_zones[rmse <= threshold].min()),
+        best_n_zones=int(n_zones[best]),
+        threshold=threshold,
+    )
