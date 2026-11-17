@@ -159,6 +159,24 @@ def test_optimize_zones_result(
     assert completed["cuts"].map(len).add(1).equals(completed["n_zones"])
 
 
+def test_optimize_zones_reports_progress(
+    model: ModelingHeartRate, config: HeartRateConfig
+) -> None:
+    reports: list[tuple[float, str]] = []
+
+    model.optimize_zones(
+        progress_cb=lambda fraction, text: reports.append((fraction, text))
+    )
+
+    fractions = [fraction for fraction, _ in reports]
+    assert fractions == sorted(fractions)
+    assert fractions[-1] == pytest.approx(1.0)
+    assert all(0.0 <= fraction <= 1.0 for fraction in fractions)
+    assert (
+        reports[-1][1] == f"N=3: {config.n_trials}/{config.n_trials} completed trials"
+    )
+
+
 def test_optimize_zones_is_reproducible(
     dataset: pd.DataFrame, config: HeartRateConfig, tmp_path: Path
 ) -> None:

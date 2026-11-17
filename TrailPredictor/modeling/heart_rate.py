@@ -1,7 +1,7 @@
 """Optimisation of the heart-rate zone cuts with Optuna."""
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import partial
 from itertools import pairwise
 from pathlib import Path
@@ -11,11 +11,13 @@ import numpy as np
 import optuna
 import pandas as pd
 from optuna.study import MaxTrialsCallback
-from optuna.trial import BaseTrial, TrialState
+from optuna.study import Study
+from optuna.trial import BaseTrial, FrozenTrial, TrialState
 from pydantic import AfterValidator, Field, PositiveInt, model_validator
 from sklearn.linear_model import LinearRegression
 
 from TrailPredictor.dataset import Dataset
+from TrailPredictor.load_fit import ProgressCallback
 from TrailPredictor.modeling.base_model import BaseModeling
 from TrailPredictor.modeling.config import ModelConfig
 from TrailPredictor.utils import MODELS_DIR
@@ -262,13 +264,20 @@ class ModelingHeartRate(BaseModeling[HeartRateConfig]):
         trial.set_user_attr("rmse_se", rmse_se)
         return rmse
 
-    def optimize_n_zones(self, n_zones: int) -> optuna.Study:
+    def optimize_n_zones(
+        self,
+        n_zones: int,
+        callbacks: Sequence[Callable[[Study, FrozenTrial], None]] = (),
+    ) -> optuna.Study:
         """Search the best cuts for a given number of zones.
 
         Parameters
         ----------
         n_zones : int
             Number of zones N, i.e. N-1 cuts.
+        callbacks : sequence of callable, optional
+            Extra Optuna callbacks, called with ``(study, trial)`` after each
+            trial, e.g. to report the progress. Default is none.
 
         Returns
         -------
@@ -289,13 +298,41 @@ class ModelingHeartRate(BaseModeling[HeartRateConfig]):
             # stop after n_trials completed trials: the (free) pruned trials do
             # not consume the budget
             callbacks=[
-                MaxTrialsCallback(self._config.n_trials, states=(TrialState.COMPLETE,))
+                MaxTrialsCallback(self._config.n_trials, states=(TrialState.COMPLETE,)),
+                *callbacks,
             ],
         )
         return study
 
-    def optimize_zones(self) -> dict[int, optuna.Study]:
+    def _progress_callback(
+        self, progress_cb: ProgressCallback, n_zones: int, study_index: int
+    ) -> Callable[[Study, FrozenTrial], None]:
+        """Build the Optuna callback reporting the progress of one study."""
+        n_trials = self._config.n_trials
+        total = n_trials * len(self._config.zone_counts)
+
+        def report(study: Study, _trial: FrozenTrial) -> None:
+            completed = len(
+                study.get_trials(deepcopy=False, states=(TrialState.COMPLETE,))
+            )
+            progress_cb(
+                (study_index * n_trials + completed) / total,
+                f"N={n_zones}: {completed}/{n_trials} completed trials",
+            )
+
+        return report
+
+    def optimize_zones(
+        self, progress_cb: ProgressCallback | None = None
+    ) -> dict[int, optuna.Study]:
         """Run one study per number of zones, then store and save the trials.
+
+        Parameters
+        ----------
+        progress_cb : ProgressCallback or None, optional
+            Called with ``(fraction, message)`` after each trial, the fraction
+            being the share of completed trials over all the studies. Default
+            is None.
 
         Returns
         -------
@@ -303,8 +340,13 @@ class ModelingHeartRate(BaseModeling[HeartRateConfig]):
             Finished study of each number of zones of ``config.zone_counts``.
         """
         studies = {
-            n_zones: self.optimize_n_zones(n_zones)
-            for n_zones in self._config.zone_counts
+            n_zones: self.optimize_n_zones(
+                n_zones,
+                callbacks=()
+                if progress_cb is None
+                else (self._progress_callback(progress_cb, n_zones, index),),
+            )
+            for index, n_zones in enumerate(self._config.zone_counts)
         }
         self.result = pd.concat(
             [
