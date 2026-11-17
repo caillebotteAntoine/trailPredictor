@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from TrailPredictor.modeling.config import ModelConfig
 from TrailPredictor.speed_columns import add_speed_columns
 
 RUNNING_SPEED = 3.0  # m/s
@@ -20,6 +21,12 @@ START_LAT = 45.0  # degrees
 START_LONG = 6.0  # degrees
 LAT_LONG_STEP = 0.0025  # degrees between two consecutive segments
 ACTIVITY_NAME = "Test run"
+N_SPLITS = 2  # the test dataset holds two activities
+TEST_SIZE = 0.2  # 20 % test size: one test activity
+N_ACTIVITIES_SPLIT = 10  # 20 % test size: two test activities
+TWO_ZONES = {"low": (0, 160), "high": (160, 250)}
+CUSTOM_DROP_THRESHOLD = 8.0  # m: the -5 m drops become "Flat"
+SEED = 0
 
 SegmentsFactory = Callable[..., pd.DataFrame]
 
@@ -164,3 +171,9 @@ def dataset(make_segments: SegmentsFactory, make_dataset) -> pd.DataFrame:
             ),
         }
     )
+
+
+@pytest.fixture
+def model_config() -> ModelConfig:
+    """Return a default model config for testing."""
+    return ModelConfig(seed=SEED, n_splits=N_SPLITS, test_size=TEST_SIZE)

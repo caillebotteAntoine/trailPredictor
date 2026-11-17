@@ -19,9 +19,13 @@ class ModelConfig(BaseModel):
     ----------
     seed : int, optional
         Seed of every random step of the model. Default is 42.
+
     n_splits : int, optional
         Number of ``GroupKFold`` folds (groups are the activities), at least 2.
         Default is 5.
+
+    test_size : float, optional
+        Fraction of activities to hold out for testing, between 0 and 1. Default is 0.2.
 
     Raises
     ------
@@ -38,6 +42,7 @@ class ModelConfig(BaseModel):
 
     seed: int = 42
     n_splits: int = Field(default=5, ge=MIN_SPLITS)
+    test_size: float = Field(default=0.2, ge=0.0, le=1.0)
 
     @property
     def key(self) -> str:

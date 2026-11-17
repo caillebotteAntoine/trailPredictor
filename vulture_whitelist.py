@@ -14,6 +14,7 @@ from TrailPredictor.dataset import Dataset
 from TrailPredictor.modeling import candidates
 from TrailPredictor.modeling.config import ModelConfig
 from TrailPredictor.modeling.heart_rate import HeartRateConfig, ModelingHeartRate
+from TrailPredictor.modeling.lasso import ModelingLasso
 from TrailPredictor.plot import (
     PlotActivities,
     PlotDataset,
@@ -39,6 +40,7 @@ PlotActivities.iter_heart_rate_zones
 PlotHeartRate.from_model
 PlotHeartRate.trials_zones
 PlotHeartRate.best_zones_per_n
+ModelingLasso.evaluate_selection
 
 # --- False positives
 # Attribute of a plotly trace, set in PlotDataset.merge_figure.

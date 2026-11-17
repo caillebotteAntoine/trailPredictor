@@ -3,18 +3,16 @@
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
-import numpy as np
-import numpy.typing as npt
 import pandas as pd
-from sklearn.base import RegressorMixin
+from sklearn import config_context
+from sklearn.base import RegressorMixin, TransformerMixin
 from sklearn.model_selection import GroupKFold
 from sklearn.model_selection import cross_validate as sklearn_cross_validate
 from sklearn.pipeline import Pipeline
 
 from TrailPredictor.dataset import Dataset
-from TrailPredictor.features import split_test_train
 from TrailPredictor.modeling.config import ModelConfig
 from TrailPredictor.utils import MODELS_DIR
 
@@ -120,26 +118,6 @@ class BaseModeling[ConfigT: ModelConfig](ABC):
             return None
         return pd.read_csv(path)
 
-    def split_test_train(self) -> tuple[Dataset, Dataset]:
-        """Split the dataset into a training and a test set by activity.
-
-        Returns
-        -------
-        train : Dataset
-            Training activities, with the same target.
-        test : Dataset
-            Test activities, with the same target.
-
-        See Also
-        --------
-        TrailPredictor.features.split_test_train : Underlying split.
-        """
-        train_data, test_data = split_test_train(
-            self._dataset.data, random_state=self._config.seed
-        )
-        target_name = self._dataset.target_name
-        return Dataset(train_data, target_name), Dataset(test_data, target_name)
-
     @abstractmethod
     def make_estimator(self) -> RegressorMixin:
         """Return the unfitted regressor placed after the preprocessing.
@@ -150,8 +128,21 @@ class BaseModeling[ConfigT: ModelConfig](ABC):
             Unfitted regressor.
         """
 
+    def make_pipeline_steps(self) -> list[tuple[str, TransformerMixin]]:
+        """Return the unfitted steps placed between preprocessing and regression.
+
+        Override it to add e.g. a feature selection step; the base pipeline
+        has none.
+
+        Returns
+        -------
+        list[tuple[str, sklearn.base.TransformerMixin]]
+            Named steps, in pipeline order.
+        """
+        return []
+
     def build_pipeline(self, dataset: Dataset | None = None) -> Pipeline:
-        """Build the preprocessing + regression pipeline.
+        """Build the preprocessing, intermediate steps and regression pipeline.
 
         Parameters
         ----------
@@ -163,19 +154,28 @@ class BaseModeling[ConfigT: ModelConfig](ABC):
         -------
         sklearn.pipeline.Pipeline
             Unfitted pipeline.
+
+        See Also
+        --------
+        make_pipeline_steps : Steps between preprocessing and regression.
         """
         dataset = self._dataset if dataset is None else dataset
         return Pipeline(
             [
                 ("preprocess", dataset.get_preprocess()),
+                *self.make_pipeline_steps(),
                 ("regression", self.make_estimator()),
             ]
         )
 
     def cross_validate(
-        self, dataset: Dataset | None = None
-    ) -> dict[str, npt.NDArray[np.float64]]:
+        self, dataset: Dataset | None = None, *, return_estimator: bool = False
+    ) -> dict[str, Any]:
         """Cross-validate the pipeline with folds grouped by activity.
+
+        The activity ids are routed as ``groups`` (sklearn metadata routing) to
+        the outer folds and to every pipeline step requesting them, e.g. a
+        ``LassoCV`` whose inner folds must also be grouped by activity.
 
         Parameters
         ----------
@@ -183,27 +183,28 @@ class BaseModeling[ConfigT: ModelConfig](ABC):
             Dataset to cross-validate on, e.g. a variant of the dataset of the
             model with other features. Default is None, meaning the dataset of
             the model.
+        return_estimator : bool, optional
+            Also return the pipeline fitted on each fold, under the
+            ``"estimator"`` key. Default is False.
 
         Returns
         -------
-        dict[str, numpy.ndarray]
-            Scores of ``sklearn.model_selection.cross_validate``, each an
-            array of shape ``(n_splits,)``; the ``"test_score"`` entry holds
-            the negative RMSE of each fold.
+        dict[str, Any]
+            Result of ``sklearn.model_selection.cross_validate``: arrays of
+            shape ``(n_splits,)``, the ``"test_score"`` entry holding the
+            negative RMSE of each fold, and the fitted pipelines if requested.
         """
         dataset = self._dataset if dataset is None else dataset
-        predictors = dataset.predictors
-        target = dataset.target
-        groups = dataset.data[GROUP_COLUMN]
-        # folds precomputed from `groups`: no `groups=` nor metadata routing needed
-        folds = list(
-            GroupKFold(n_splits=self._config.n_splits).split(predictors, target, groups)
-        )
-        return sklearn_cross_validate(
-            self.build_pipeline(dataset),
-            predictors,
-            target,
-            scoring=RMSE_SCORING,
-            cv=folds,
-            error_score="raise",
-        )
+        # routing enabled only here, not globally: the rest of the code (and
+        # the notebooks) keep the default sklearn behaviour
+        with config_context(enable_metadata_routing=True):
+            return sklearn_cross_validate(
+                self.build_pipeline(dataset),
+                dataset.predictors,
+                dataset.target,
+                scoring=RMSE_SCORING,
+                cv=GroupKFold(n_splits=self._config.n_splits),
+                params={"groups": dataset.data[GROUP_COLUMN]},
+                return_estimator=return_estimator,
+                error_score="raise",
+            )

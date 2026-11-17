@@ -9,6 +9,7 @@ import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 
+from TrailPredictor.features import split_test_train
 from TrailPredictor.activities import RunningActivities
 from TrailPredictor.features import (
     assign_heart_rate_zones,
@@ -323,6 +324,33 @@ class Dataset:
             if feature in TARGET_COLUMNS + PREDICTION_COLUMNS:
                 raise ValueError(f"'{feature}' cannot be used as a predictor.")
         self._features = features.copy()
+
+    def split_test_train(
+        self, test_size: float, random_state: int
+    ) -> tuple["Dataset", "Dataset"]:
+        """Split the dataset into a training and a test set by activity.
+
+        Parameters
+        ----------
+        test_size : float, optional
+            Fraction of the activities in the test set.
+        random_state : int, optional
+            Seed of the split.
+
+        Returns
+        -------
+        train : Dataset
+            Training activities, with the same target.
+        test : Dataset
+            Test activities, with the same target.
+
+        See Also
+        --------
+        TrailPredictor.features.split_test_train : Underlying split.
+        """
+        train_data, test_data = split_test_train(self.data, test_size, random_state)
+        target_name = self.target_name
+        return Dataset(train_data, target_name), Dataset(test_data, target_name)
 
     def with_heart_rate_zones(
         self,

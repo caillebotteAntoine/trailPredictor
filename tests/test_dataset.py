@@ -2,11 +2,9 @@
 
 import pandas as pd
 import pytest
+from conftest import CUSTOM_DROP_THRESHOLD, N_ACTIVITIES_SPLIT, TWO_ZONES
 
 from TrailPredictor.dataset import Dataset
-
-TWO_ZONES = {"low": (0, 160), "high": (160, 250)}
-CUSTOM_DROP_THRESHOLD = 8.0  # m: the -5 m drops become "Flat"
 
 
 @pytest.fixture
@@ -89,3 +87,27 @@ def test_predictors_are_the_features(ds: Dataset) -> None:
 def test_invalid_feature_raises(ds: Dataset, feature: str, message: str) -> None:
     with pytest.raises(ValueError, match=message):
         ds.features = ["slope", feature]
+
+
+def test_split_test_train_keeps_activities_whole(
+    model_config, make_segments, make_dataset
+) -> None:
+    # enough activities for both sets to hold several of them: build_features
+    # drops `activity_id` from a single-activity dataset
+    activity_ids = range(N_ACTIVITIES_SPLIT)
+    data = Dataset(
+        make_dataset(
+            {i: make_segments([100.0, 110.0 + i, 105.0, 120.0]) for i in activity_ids}
+        )
+    )
+    data.target = "speed"
+
+    train, test = data.split_test_train(
+        test_size=model_config.test_size, random_state=model_config.seed
+    )
+
+    train_ids = set(train.data["activity_id"])
+    test_ids = set(test.data["activity_id"])
+    assert not train_ids & test_ids
+    assert train_ids | test_ids == set(activity_ids)
+    assert train.target_name == test.target_name == "speed"

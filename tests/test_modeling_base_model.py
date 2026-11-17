@@ -7,15 +7,13 @@ from typing import ClassVar
 import numpy as np
 import pandas as pd
 import pytest
-from conftest import DEFAULT_HEART_RATE
+import sklearn
+from conftest import DEFAULT_HEART_RATE, N_SPLITS, SEED, TEST_SIZE
 from sklearn.linear_model import LinearRegression
 
 from TrailPredictor.dataset import Dataset
 from TrailPredictor.modeling.base_model import BaseModeling
 from TrailPredictor.modeling.config import ModelConfig
-
-N_SPLITS = 2  # the test dataset holds two activities
-N_ACTIVITIES_SPLIT = 10  # 20 % test size: two test activities
 
 
 class LinearModeling(BaseModeling[ModelConfig]):
@@ -28,12 +26,12 @@ class LinearModeling(BaseModeling[ModelConfig]):
 
 
 @pytest.fixture
-def model(dataset: pd.DataFrame, tmp_path: Path) -> LinearModeling:
+def model(
+    dataset: pd.DataFrame, model_config: ModelConfig, tmp_path: Path
+) -> LinearModeling:
     # heart rate inside the default zones: an "Unknown" zone breaks the one-hot
     in_zone = dataset.assign(heart_rate=DEFAULT_HEART_RATE)
-    return LinearModeling(
-        Dataset(in_zone), ModelConfig(n_splits=N_SPLITS), models_dir=tmp_path
-    )
+    return LinearModeling(Dataset(in_zone), model_config, models_dir=tmp_path)
 
 
 def test_cannot_instantiate_abstract_base(
@@ -66,8 +64,9 @@ def test_save_and_reload(model: LinearModeling, tmp_path: Path) -> None:
     assert reloaded.result is not None
     pd.testing.assert_frame_equal(reloaded.result, model.result)
     assert json.loads(path.with_suffix(".json").read_text()) == {
-        "seed": 42,
+        "seed": SEED,
         "n_splits": N_SPLITS,
+        "test_size": TEST_SIZE,
     }
 
 
@@ -87,29 +86,35 @@ def test_cross_validate_one_score_per_fold(model: LinearModeling) -> None:
     assert np.all(scores["test_score"] <= 0.0)  # negative RMSE
 
 
+def test_default_pipeline_has_no_intermediate_step(model: LinearModeling) -> None:
+    assert model.make_pipeline_steps() == []
+    assert [name for name, _ in model.build_pipeline().steps] == [
+        "preprocess",
+        "regression",
+    ]
+
+
+def test_cross_validate_returns_fitted_pipelines(model: LinearModeling) -> None:
+    scores = model.cross_validate(return_estimator=True)
+
+    assert len(scores["estimator"]) == N_SPLITS
+    assert all(
+        hasattr(pipeline.named_steps["regression"], "coef_")
+        for pipeline in scores["estimator"]
+    )
+
+
+def test_cross_validate_leaves_metadata_routing_disabled(
+    model: LinearModeling,
+) -> None:
+    model.cross_validate()
+
+    assert not sklearn.get_config()["enable_metadata_routing"]
+
+
 def test_cross_validate_does_not_modify_dataset(model: LinearModeling) -> None:
     before = model.dataset.data
 
     model.cross_validate()
 
     pd.testing.assert_frame_equal(model.dataset.data, before)
-
-
-def test_split_test_train_keeps_activities_whole(
-    make_segments, make_dataset, tmp_path: Path
-) -> None:
-    # enough activities for both sets to hold several of them: build_features
-    # drops `activity_id` from a single-activity dataset
-    activity_ids = range(N_ACTIVITIES_SPLIT)
-    data = make_dataset(
-        {i: make_segments([100.0, 110.0 + i, 105.0, 120.0]) for i in activity_ids}
-    )
-    model = LinearModeling(Dataset(data, target="speed"), ModelConfig(), tmp_path)
-
-    train, test = model.split_test_train()
-
-    train_ids = set(train.data["activity_id"])
-    test_ids = set(test.data["activity_id"])
-    assert not train_ids & test_ids
-    assert train_ids | test_ids == set(activity_ids)
-    assert train.target_name == test.target_name == "speed"
