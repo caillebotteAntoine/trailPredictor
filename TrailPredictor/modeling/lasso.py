@@ -1,21 +1,28 @@
 """Feature selection with a Lasso, followed by a linear regression."""
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
+import numpy as np
+import numpy.typing as npt
 import pandas as pd
 from pydantic import Field, PositiveInt
+from sklearn import config_context
 from sklearn.base import TransformerMixin
 from sklearn.feature_selection import SelectFromModel
-from sklearn.linear_model import LassoCV, LinearRegression
+from sklearn.linear_model import LassoCV, LinearRegression, lasso_path
 from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from TrailPredictor.dataset import Dataset
-from TrailPredictor.modeling.base_model import BaseModeling
+from TrailPredictor.modeling.base_model import GROUP_COLUMN, BaseModeling
 from TrailPredictor.modeling.config import MIN_SPLITS, ModelConfig
 from TrailPredictor.utils import MODELS_DIR
+
+if TYPE_CHECKING:
+    from TrailPredictor.plot.lasso import PlotLasso
 
 SELECTION_COLUMNS = ["fold", "feature", "lasso_coef", "selected", "alpha", "rmse"]
 
@@ -52,6 +59,102 @@ class LassoConfig(ModelConfig):
     n_alphas: PositiveInt = 100
     selection_threshold: float = Field(default=1e-5, ge=0.0)
     max_iter: PositiveInt = 10_000
+
+
+@dataclass(frozen=True, slots=True)
+class LassoPath:
+    """Regularisation path of a ``LassoCV`` and its cross-validation error.
+
+    Parameters
+    ----------
+    coef_path : pandas.DataFrame
+        Standardised coefficients along the path, indexed by decreasing α,
+        one column per feature.
+    mse_path : ndarray of shape (n_alphas, n_folds)
+        Cross-validation MSE of each α (rows aligned with `coef_path`) and
+        inner fold, in squared target units.
+    alpha : float
+        α selected by ``LassoCV`` (minimum mean CV error).
+    threshold : float, optional
+        A feature is active when its absolute coefficient is above this
+        value. Default is 0.0.
+
+    Raises
+    ------
+    ValueError
+        If `mse_path` is not 2D or has not one row per α of `coef_path`.
+
+    See Also
+    --------
+    ModelingLasso.fit_regularization_path : Build the path of a model.
+    """
+
+    coef_path: pd.DataFrame
+    mse_path: npt.NDArray[np.float64]
+    alpha: float
+    threshold: float = 0.0
+
+    def __post_init__(self) -> None:
+        """Check that the CV errors are aligned with the path."""
+        if self.mse_path.ndim != 2 or len(self.mse_path) != len(self.coef_path):
+            raise ValueError(
+                f"mse_path of shape {self.mse_path.shape} does not match "
+                f"{len(self.coef_path)} alphas"
+            )
+
+    @property
+    def alphas(self) -> npt.NDArray[np.float64]:
+        """Return the decreasing α grid, of shape (n_alphas,)."""
+        return self.coef_path.index.to_numpy(dtype=np.float64)
+
+    @property
+    def mse_mean(self) -> npt.NDArray[np.float64]:
+        """Return the mean CV MSE over the folds, of shape (n_alphas,)."""
+        return self.mse_path.mean(axis=1)
+
+    @property
+    def mse_se(self) -> npt.NDArray[np.float64]:
+        """Return the standard error of the CV MSE, of shape (n_alphas,)."""
+        return self.mse_path.std(axis=1) / np.sqrt(self.mse_path.shape[1])
+
+    @property
+    def mse_threshold(self) -> float:
+        """Return the minimum mean CV MSE plus its standard error."""
+        i_min = int(np.argmin(self.mse_mean))
+        return float(self.mse_mean[i_min] + self.mse_se[i_min])
+
+    @property
+    def alpha_1se(self) -> float:
+        """Return the largest α within one standard error of the minimum.
+
+        Returns
+        -------
+        float
+            α of the "one standard error" rule: the sparsest model whose
+            mean CV MSE is at most ``mse_threshold``.
+        """
+        return float(self.alphas[self.mse_mean <= self.mse_threshold].max())
+
+    @property
+    def n_active(self) -> pd.Series:
+        """Return the number of active features at each α of the path."""
+        return (self.coef_path.abs() > self.threshold).sum(axis=1)
+
+    def coefs_at(self, alpha: float) -> pd.Series:
+        """Return the coefficients at the path point closest to `alpha`.
+
+        Parameters
+        ----------
+        alpha : float
+            Strictly positive α; closeness is measured on a log scale.
+
+        Returns
+        -------
+        pandas.Series
+            Standardised coefficients, indexed by feature name.
+        """
+        i_closest = int(np.argmin(np.abs(np.log(self.alphas) - np.log(alpha))))
+        return self.coef_path.iloc[i_closest]
 
 
 class ModelingLasso(BaseModeling[LassoConfig]):
@@ -127,6 +230,63 @@ class ModelingLasso(BaseModeling[LassoConfig]):
             Unfitted regressor.
         """
         return LinearRegression()
+
+    @property
+    def plot(self) -> "PlotLasso":
+        """Return a plotting interface of the Lasso selection.
+
+        Returns
+        -------
+        PlotLasso
+            Plotting interface sharing the dataset and configuration.
+        """
+        # Lazy import: TrailPredictor.plot.lasso subclasses ModelingLasso.
+        from TrailPredictor.plot.lasso import (  # pylint: disable=import-outside-toplevel
+            PlotLasso,
+        )
+
+        return PlotLasso(self)
+
+    def fit_regularization_path(self) -> LassoPath:
+        """Fit the selection on the whole dataset and compute its Lasso path.
+
+        The preprocessing, standardisation and ``LassoCV`` steps are fitted on
+        every activity (inner folds grouped by activity), then the
+        coefficients are recomputed by coordinate descent on the ``LassoCV``
+        grid ``alphas_``, so they line up with its CV error ``mse_path_``.
+
+        Returns
+        -------
+        LassoPath
+            Standardised coefficients and CV error along the path.
+        """
+        predictors, target = self._dataset.predictors, self._dataset.target
+        selection = Pipeline(
+            [
+                ("preprocess", self._dataset.get_preprocess()),
+                *self.make_pipeline_steps(),
+            ]
+        )
+        with config_context(enable_metadata_routing=True):
+            selection.fit(predictors, target, groups=self._dataset.data[GROUP_COLUMN])
+        lasso_cv = selection.named_steps["selection"].estimator_
+        scaled = selection[:-1].transform(predictors)
+
+        # centring X and y is what fit_intercept=True does inside LassoCV
+        design = scaled.to_numpy(dtype=np.float64)
+        response = target.to_numpy(dtype=np.float64)
+        alphas, coefs, _ = lasso_path(
+            design - design.mean(axis=0),
+            response - response.mean(),
+            alphas=lasso_cv.alphas_,
+            max_iter=self._config.max_iter,
+        )
+        return LassoPath(
+            coef_path=pd.DataFrame(coefs.T, index=alphas, columns=scaled.columns),
+            mse_path=np.asarray(lasso_cv.mse_path_, dtype=np.float64),
+            alpha=float(lasso_cv.alpha_),
+            threshold=self._config.selection_threshold,
+        )
 
     def evaluate_selection(self) -> pd.DataFrame:
         """Cross-validate the pipeline and record the selection of each fold.

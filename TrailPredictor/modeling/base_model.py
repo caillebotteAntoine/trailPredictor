@@ -67,6 +67,11 @@ class BaseModeling[ConfigT: ModelConfig](ABC):
         return self._config
 
     @property
+    def models_dir(self) -> Path:
+        """Return the root directory of the saved results."""
+        return self._models_dir
+
+    @property
     def result_path(self) -> Path:
         """Return the CSV file of the result of this configuration.
 

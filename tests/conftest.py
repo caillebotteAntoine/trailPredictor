@@ -27,6 +27,10 @@ N_ACTIVITIES_SPLIT = 10  # 20 % test size: two test activities
 TWO_ZONES = {"low": (0, 160), "high": (160, 250)}
 CUSTOM_DROP_THRESHOLD = 8.0  # m: the -5 m drops become "Flat"
 SEED = 0
+LASSO_N_ACTIVITIES = 6
+LASSO_N_SEGMENTS = 8
+MAX_STEP_M = 15  # altitude change between two segments, in metres
+SLOPE_SPEED_FACTOR = 0.05  # m/s lost per metre climbed in a segment
 
 SegmentsFactory = Callable[..., pd.DataFrame]
 
@@ -171,6 +175,23 @@ def dataset(make_segments: SegmentsFactory, make_dataset) -> pd.DataFrame:
             ),
         }
     )
+
+
+@pytest.fixture
+def lasso_data(make_segments: SegmentsFactory, make_dataset) -> pd.DataFrame:
+    """Activities whose speed decreases with the climb of each segment."""
+    rng = np.random.default_rng(SEED)
+    activities = {}
+    for activity_id in range(LASSO_N_ACTIVITIES):  # few activities: loop over inputs
+        steps = rng.integers(-MAX_STEP_M, MAX_STEP_M + 1, size=LASSO_N_SEGMENTS)
+        steps[0] = 0
+        # climb and descend in every activity: a zero total climb or descent
+        # makes the done / remaining ratios 0 / 0 = NaN in build_features
+        steps[1:3] = [MAX_STEP_M, -MAX_STEP_M]
+        altitude = 100.0 + np.cumsum(steps)
+        speed = RUNNING_SPEED - SLOPE_SPEED_FACTOR * steps
+        activities[activity_id] = make_segments(altitude, speed=speed)
+    return make_dataset(activities)
 
 
 @pytest.fixture

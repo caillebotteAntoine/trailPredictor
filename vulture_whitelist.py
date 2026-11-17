@@ -19,6 +19,7 @@ from TrailPredictor.plot import (
     PlotActivities,
     PlotDataset,
     PlotHeartRate,
+    PlotLasso,
     plot_minetti_curve,
 )
 
@@ -41,6 +42,8 @@ PlotHeartRate.from_model
 PlotHeartRate.trials_zones
 PlotHeartRate.best_zones_per_n
 ModelingLasso.evaluate_selection
+ModelingLasso.plot
+PlotLasso.regularization_path
 
 # --- False positives
 # Attribute of a plotly trace, set in PlotDataset.merge_figure.

@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from conftest import LASSO_N_ACTIVITIES, SEED
 from pydantic import ValidationError
 from sklearn import config_context
 from sklearn.linear_model import LinearRegression
@@ -16,36 +17,15 @@ from TrailPredictor.modeling import lasso as lasso_module
 from TrailPredictor.modeling.lasso import (
     SELECTION_COLUMNS,
     LassoConfig,
+    LassoPath,
     ModelingLasso,
     selection_frequency,
 )
 from TrailPredictor.modeling.models import Modeling
 
-SEED = 0
-N_ACTIVITIES = 6
-N_SEGMENTS = 8
 N_SPLITS = 2  # outer folds: 3 training activities each
 INNER_N_SPLITS = 2
-MAX_STEP_M = 15  # altitude change between two segments, in metres
-SLOPE_SPEED_FACTOR = 0.05  # m/s lost per metre climbed in a segment
-BASE_SPEED = 3.0  # m/s
-
-
-@pytest.fixture
-def lasso_data(make_segments, make_dataset) -> pd.DataFrame:
-    """Activities whose speed decreases with the climb of each segment."""
-    rng = np.random.default_rng(SEED)
-    activities = {}
-    for activity_id in range(N_ACTIVITIES):  # few activities: loop over inputs
-        steps = rng.integers(-MAX_STEP_M, MAX_STEP_M + 1, size=N_SEGMENTS)
-        steps[0] = 0
-        # climb and descend in every activity: a zero total climb or descent
-        # makes the done / remaining ratios 0 / 0 = NaN in build_features
-        steps[1:3] = [MAX_STEP_M, -MAX_STEP_M]
-        altitude = 100.0 + np.cumsum(steps)
-        speed = BASE_SPEED - SLOPE_SPEED_FACTOR * steps
-        activities[activity_id] = make_segments(altitude, speed=speed)
-    return make_dataset(activities)
+OBJECTIVE_RTOL = 1e-3  # coordinate descent stops at a duality-gap tolerance
 
 
 @pytest.fixture
@@ -151,7 +131,7 @@ def test_inner_folds_only_see_training_activities(
     class SpyGroupKFold(GroupKFold):
         """GroupKFold recording the number of groups of each split."""
 
-        def split(self, X, y=None, groups=None):  # noqa: N803 (sklearn signature)
+        def split(self, X, y=None, groups=None):
             seen_groups.append(len(np.unique(groups)))
             return super().split(X, y, groups)
 
@@ -160,7 +140,9 @@ def test_inner_folds_only_see_training_activities(
     model.cross_validate()
 
     # one LassoCV fit per outer fold, on its training activities only
-    assert seen_groups == [N_ACTIVITIES - N_ACTIVITIES // N_SPLITS] * N_SPLITS
+    assert (
+        seen_groups == [LASSO_N_ACTIVITIES - LASSO_N_ACTIVITIES // N_SPLITS] * N_SPLITS
+    )
 
 
 # --- evaluate_selection
@@ -215,6 +197,116 @@ def test_modeling_factory(
     assert isinstance(model, ModelingLasso)
     assert model.config is config
     assert model.result is None
+
+
+# --- regularisation path
+
+
+@pytest.fixture
+def toy_path() -> LassoPath:
+    """Three alphas, two features, two folds with hand-checked statistics."""
+    return LassoPath(
+        coef_path=pd.DataFrame(
+            {"a": [0.0, 1.0, 2.0], "b": [0.0, 0.0, -0.5]}, index=[1.0, 0.1, 0.01]
+        ),
+        mse_path=np.array([[4.0, 6.0], [2.0, 2.4], [1.8, 2.2]]),
+        alpha=0.01,
+    )
+
+
+def test_lasso_path_statistics(toy_path: LassoPath) -> None:
+    np.testing.assert_allclose(toy_path.alphas, [1.0, 0.1, 0.01])
+    np.testing.assert_allclose(toy_path.mse_mean, [5.0, 2.2, 2.0])
+    np.testing.assert_allclose(
+        toy_path.mse_se, [1.0 / np.sqrt(2), 0.2 / np.sqrt(2)] + [0.2 / np.sqrt(2)]
+    )
+    assert toy_path.mse_threshold == pytest.approx(2.0 + 0.2 / np.sqrt(2))
+    # 2.2 <= 2.141 is false: the 1-SE rule keeps the selected alpha
+    assert toy_path.alpha_1se == pytest.approx(0.01)
+    assert toy_path.n_active.tolist() == [0, 1, 2]
+
+
+def test_lasso_path_alpha_1se_picks_sparser_model() -> None:
+    path = LassoPath(
+        coef_path=pd.DataFrame({"a": [0.0, 1.0, 2.0]}, index=[1.0, 0.1, 0.01]),
+        mse_path=np.array([[4.0, 6.0], [2.0, 2.2], [1.0, 3.0]]),
+        alpha=0.01,
+    )
+
+    # threshold 2.0 + 1 / sqrt(2) > 2.1, the mean error at alpha = 0.1
+    assert path.alpha_1se == pytest.approx(0.1)
+
+
+@pytest.mark.parametrize(
+    ("alpha", "expected"), [(0.5, [0.0, 0.0]), (0.02, [2.0, -0.5])]
+)
+def test_lasso_path_coefs_at_closest_log_alpha(
+    toy_path: LassoPath, alpha: float, expected: list[float]
+) -> None:
+    np.testing.assert_allclose(toy_path.coefs_at(alpha), expected)
+
+
+def test_lasso_path_misaligned_mse_raises() -> None:
+    with pytest.raises(ValueError, match="does not match"):
+        LassoPath(
+            coef_path=pd.DataFrame({"a": [0.0, 1.0]}, index=[1.0, 0.1]),
+            mse_path=np.ones((3, 2)),
+            alpha=0.1,
+        )
+
+
+def test_fit_regularization_path(model: ModelingLasso) -> None:
+    path = model.fit_regularization_path()
+
+    n_features = path.coef_path.shape[1]
+    assert path.mse_path.shape == (model.config.n_alphas, INNER_N_SPLITS)
+    assert len(path.coef_path) == model.config.n_alphas
+    assert (np.diff(path.alphas) < 0).all()
+    assert path.threshold == pytest.approx(model.config.selection_threshold)
+    # the strongest penalty zeroes every coefficient, the weakest keeps some
+    assert path.n_active.iloc[0] == 0
+    assert 0 < path.n_active.iloc[-1] <= n_features
+    assert path.alphas.min() <= path.alpha <= path.alpha_1se <= path.alphas.max()
+
+
+def test_fit_regularization_path_matches_lasso_cv(model: ModelingLasso) -> None:
+    pipeline = Pipeline(
+        [("preprocess", model.dataset.get_preprocess()), *model.make_pipeline_steps()]
+    )
+    with config_context(enable_metadata_routing=True):
+        pipeline.fit(
+            model.dataset.predictors,
+            model.dataset.target,
+            groups=model.dataset.data["activity_id"],
+        )
+    lasso_cv = pipeline.named_steps["selection"].estimator_
+    design = pipeline[:-1].transform(model.dataset.predictors).to_numpy(dtype=float)
+    design = design - design.mean(axis=0)
+    response = model.dataset.target.to_numpy(dtype=float)
+    response = response - response.mean()
+
+    def lasso_objective(coefs: np.ndarray, alpha: float) -> float:
+        residuals = response - design @ coefs
+        return residuals @ residuals / (2 * len(response)) + alpha * np.abs(coefs).sum()
+
+    path = model.fit_regularization_path()
+
+    assert path.alpha == pytest.approx(lasso_cv.alpha_)
+    np.testing.assert_allclose(path.mse_path, lasso_cv.mse_path_)
+    # the test design is rank deficient, so the Lasso solution is not unique:
+    # compare the objective reached, not the coefficients
+    path_objective = lasso_objective(path.coefs_at(path.alpha).to_numpy(), path.alpha)
+    assert path_objective <= lasso_objective(lasso_cv.coef_, path.alpha) * (
+        1 + OBJECTIVE_RTOL
+    )
+
+
+def test_fit_regularization_path_does_not_modify_dataset(model: ModelingLasso) -> None:
+    before = model.dataset.data
+
+    model.fit_regularization_path()
+
+    pd.testing.assert_frame_equal(model.dataset.data, before)
 
 
 # --- selection_frequency
