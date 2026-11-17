@@ -42,12 +42,7 @@ repos:
       # missing, unused or transitive dependencies are reported.
       - id: deptry
         entry: poetry run deptry .
-        # regpath is the local helper module of notebooks/, not a dependency.
-        args:
-          [
-            "--known-first-party=regpath",
-            "--per-rule-ignores=DEP002=jax|numpyro|netcdf4|nbformat",
-          ]
+        args: ["--per-rule-ignores=DEP002=jax|numpyro|netcdf4|nbformat"]
 
   - repo: local
     hooks:
@@ -79,8 +74,7 @@ repos:
         entry: poetry run python -m pylint
         language: system
         types: [python]
-        # regpath.py is an exploration script, not part of the package.
-        exclude: ^(tests/|notebooks/regpath\.py$)
+        exclude: ^tests/
         args:
           [
             "-rn",
