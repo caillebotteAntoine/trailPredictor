@@ -57,6 +57,16 @@ repos:
         pass_filenames: false   # analyse the whole project, not only staged files
         require_serial: true
 
+      # Static type checking of the package (config in [tool.mypy] of pyproject.toml).
+      # Runs through Poetry so that it uses the installed stubs (pandas-stubs).
+      - id: mypy
+        name: mypy
+        entry: poetry run mypy TrailPredictor
+        language: system
+        types: [python]
+        pass_filenames: false   # check the whole package, not only staged files
+        require_serial: true
+
       # Static analysis of the source code: bugs, code smells and style issues.
       # The docparams plugin also checks that NumPy docstrings document every parameter, return and raise.
       - id: pylint
