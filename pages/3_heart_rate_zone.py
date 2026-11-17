@@ -160,7 +160,13 @@ def run_optimization(
             progress_bar.empty()
         st_list_saved_results.clear()
         st.success("Optimisation terminée et sauvegardée.")
-    return SavedHeartRateResult(target_name, config, model.result_path)
+    return SavedHeartRateResult(
+        target_name,
+        config,
+        model.result_path,
+        dataset_key=model.dataset.key,
+        dataset_name=model.dataset.name,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -177,14 +183,21 @@ def format_label(saved: SavedHeartRateResult) -> str:
     Returns
     -------
     str
-        Label ``"<target> — N=<zone counts> — <n_trials> essais — <key>"``.
+        Label ``"<dataset> — <target> — N=<zone counts> — <n_trials> essais —
+        <key>"``, the dataset being its name and hash (or its hash alone).
     """
     config = saved.config
     zone_counts = ", ".join(str(n) for n in config.zone_counts)
     return (
-        f"{saved.target_name} — N={zone_counts} — "
+        f"{_format_dataset(saved)} — {saved.target_name} — N={zone_counts} — "
         f"{config.n_trials} essais — {config.key}"
     )
+
+
+def _format_dataset(saved: SavedHeartRateResult) -> str:
+    if saved.dataset_name is None:
+        return saved.dataset_key
+    return f"{saved.dataset_name} ({saved.dataset_key})"
 
 
 def render_dataset_info(params: tuple[int, int, int] | None, n_rows: int) -> None:

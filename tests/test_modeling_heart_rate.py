@@ -26,6 +26,7 @@ from TrailPredictor.modeling.heart_rate import (
 from TrailPredictor.modeling.models import Modeling
 
 N_SPLITS = 2  # the test dataset holds two activities
+DATASET_NAME = "dataset_40_60_1000"
 
 
 @pytest.fixture(autouse=True)
@@ -247,6 +248,8 @@ def test_list_saved_results_finds_saved_model(
     assert saved[0].target_name == model.dataset.target_name
     assert saved[0].config == model.config
     assert saved[0].result_path == model.result_path
+    assert saved[0].dataset_key == model.dataset.key
+    assert saved[0].dataset_name is None
 
 
 def test_list_saved_results_skips_invalid_files(
@@ -255,17 +258,39 @@ def test_list_saved_results_skips_invalid_files(
     model.result = pd.DataFrame({"n_zones": [2]})
     model.save_result()
     target_dir = model.result_path.parent
-    (target_dir / "no_csv.json").write_text(model.config.model_dump_json())
-    (target_dir / "bad.json").write_text('{"unknown_field": 1}')
-    (target_dir / "bad.csv").write_text("n_zones\n2\n")
-    unknown_target = tmp_path / ModelingHeartRate.name / "not_a_target"
+    metadata = model.result_path.with_suffix(".json").read_text()
+    invalid_files = {
+        "bad_config": '{"config": {"unknown_field": 1}}',
+        "bare_config": model.config.model_dump_json(),  # format before the hash
+        "not_json": "{",
+        "not_a_dict": "[]",
+    }
+    for stem, content in invalid_files.items():
+        (target_dir / f"{stem}.json").write_text(content)
+        (target_dir / f"{stem}.csv").write_text("n_zones\n2\n")
+    (target_dir / "no_csv.json").write_text(metadata)
+    unknown_target = target_dir.parent / "not_a_target"
     unknown_target.mkdir()
-    (unknown_target / "key.json").write_text(model.config.model_dump_json())
+    (unknown_target / "key.json").write_text(metadata)
     (unknown_target / "key.csv").write_text("n_zones\n2\n")
 
     saved = list_saved_results(tmp_path)
 
     assert [s.result_path for s in saved] == [model.result_path]
+
+
+def test_list_saved_results_reads_dataset_name(
+    dataset: pd.DataFrame, config: HeartRateConfig, tmp_path: Path
+) -> None:
+    named = ModelingHeartRate(
+        Dataset(dataset, name=DATASET_NAME), config, models_dir=tmp_path
+    )
+    named.result = pd.DataFrame({"n_zones": [2]})
+    named.save_result()
+
+    saved = list_saved_results(tmp_path)
+
+    assert [s.dataset_name for s in saved] == [DATASET_NAME]
 
 
 # --- summarize_zone_counts
