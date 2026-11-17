@@ -1,5 +1,7 @@
 """Tests for :class:`TrailPredictor.dataset.Dataset` feature selection and zones."""
 
+from pathlib import Path
+
 import pandas as pd
 import pytest
 from conftest import CUSTOM_DROP_THRESHOLD, N_ACTIVITIES_SPLIT, TWO_ZONES
@@ -111,3 +113,42 @@ def test_split_test_train_keeps_activities_whole(
     assert not train_ids & test_ids
     assert train_ids | test_ids == set(activity_ids)
     assert train.target_name == test.target_name == "speed"
+
+
+def test_key_survives_csv_round_trip(dataset: pd.DataFrame, tmp_path: Path) -> None:
+    # Dataset.load builds the raw data in memory the first time, then reads
+    # it back from the CSV cache: both must share the same key
+    path = tmp_path / "raw.csv"
+    dataset.to_csv(path, index=False)
+
+    read_back = Dataset(pd.read_csv(path))
+
+    assert Dataset(dataset).key == read_back.key
+
+
+def test_key_ignores_target_features_and_prediction(ds: Dataset) -> None:
+    key = ds.key
+
+    ds.target = "speed"
+    ds.features = ["slope"]
+    ds.prediction = ds.target
+
+    assert ds.key == key
+
+
+def test_key_changes_with_data(dataset: pd.DataFrame) -> None:
+    fewer_activities = dataset.loc[dataset["activity_id"] == 1]
+
+    assert Dataset(dataset).key != Dataset(fewer_activities).key
+
+
+def test_single_activity_has_key(dataset: pd.DataFrame) -> None:
+    # build_features drops activity_id when there is a single activity
+    single = Dataset(dataset.loc[dataset["activity_id"] == 1])
+
+    assert "activity_id" not in single.data.columns
+    assert single.key
+
+
+def test_key_changes_with_heart_rate_zones(ds: Dataset) -> None:
+    assert ds.with_heart_rate_zones(TWO_ZONES).key != ds.key

@@ -19,6 +19,7 @@ from TrailPredictor.features import (
     WINDOWS_KM,
     HearthRateZone,
 )
+from TrailPredictor.hashing import hash_dataframe
 from TrailPredictor.load_fit import ProgressCallback
 from TrailPredictor.speed_columns import TARGETS, Target, add_speed_columns
 from TrailPredictor.utils import COMPUTED_DIR
@@ -42,6 +43,7 @@ TARGET_COLUMNS = list(TARGETS)
 # prediction columns (e.g. "pace_pred") must never leak into the predictors
 PREDICTION_COLUMNS = [f"{t}_pred" for t in TARGETS]
 EXCLUDED_COLUMNS = set(META_COLUMNS + TARGET_COLUMNS + PREDICTION_COLUMNS)
+ROW_KEY_COLUMNS = ["activity_id", "segment"]  # identify a segment
 
 
 def infer_segment_width(data: pd.DataFrame) -> float:
@@ -72,7 +74,8 @@ def infer_segment_width(data: pd.DataFrame) -> float:
     return float(width)
 
 
-class Dataset:
+# Most public members are read-only properties of a data container.
+class Dataset:  # pylint: disable=too-many-public-methods
     """Segments of several activities with their features and target.
 
     Parameters
@@ -178,6 +181,32 @@ class Dataset:
     def data(self) -> pd.DataFrame:
         """Return a copy of the underlying data."""
         return self._data.copy()
+
+    @property
+    def key(self) -> str:
+        """Return a short hash identifying the data of the dataset.
+
+        The hash covers every column (raw data and features) except the
+        prediction columns, so setting a prediction keeps the key, while new
+        activities, another segment width, a change in the feature engineering
+        or other heart-rate zones change it. The target and the selected
+        features are not part of the key. It is recomputed at each access.
+
+        Returns
+        -------
+        str
+            Hash of the data, see ``hash_dataframe``.
+
+        See Also
+        --------
+        TrailPredictor.hashing.hash_dataframe : Hash of a DataFrame.
+        """
+        # build_features drops activity_id when there is a single activity
+        sort_by = [col for col in ROW_KEY_COLUMNS if col in self._data.columns]
+        return hash_dataframe(
+            self._data.drop(columns=PREDICTION_COLUMNS, errors="ignore"),
+            sort_by=sort_by,
+        )
 
     def get_preprocess(self):
         """Build the preprocessing step that standardises the features.
