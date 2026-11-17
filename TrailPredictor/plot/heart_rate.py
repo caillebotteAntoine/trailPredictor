@@ -15,21 +15,10 @@ from TrailPredictor.modeling.heart_rate import (
     REFERENCE_CUTS,
     ModelingHeartRate,
 )
-from TrailPredictor.plot._common import _base_layout
+from TrailPredictor.plot._common import CATEGORICAL_COLORS, _base_layout
 
-# colours of the zones Z0 ... Z9 (tab10 palette), shared by every figure
-ZONE_COLORS = (
-    "#1f77b4",
-    "#ff7f0e",
-    "#2ca02c",
-    "#d62728",
-    "#9467bd",
-    "#8c564b",
-    "#e377c2",
-    "#7f7f7f",
-    "#bcbd22",
-    "#17becf",
-)
+# colours of the zones Z0 ... Z9, shared by every figure
+ZONE_COLORS = CATEGORICAL_COLORS
 BEST_COLOR = "green"
 BEST_RMSE_COLOR = "#b41f1f"
 REFERENCE_COLOR = "gray"
