@@ -19,6 +19,7 @@ from TrailPredictor.modeling.heart_rate import (
     OneSeSelection,
     cuts_to_zones,
     list_saved_results,
+    parse_cuts,
     select_n_zones_one_se,
     suggest_cuts,
     summarize_zone_counts,
@@ -47,6 +48,40 @@ def model(
     dataset: pd.DataFrame, config: HeartRateConfig, tmp_path: Path
 ) -> ModelingHeartRate:
     return ModelingHeartRate(Dataset(dataset), config, models_dir=tmp_path)
+
+
+# --- parse_cuts
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        pytest.param("142, 161, 170, 183", REFERENCE_CUTS, id="commas"),
+        pytest.param("142;161 170\t183", REFERENCE_CUTS, id="mixed_separators"),
+        pytest.param("  150  ", [150], id="single_cut"),
+        pytest.param("142,,161,", [142, 161], id="empty_tokens"),
+    ],
+)
+def test_parse_cuts(text: str, expected: list[int]) -> None:
+    assert parse_cuts(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        pytest.param("", "At least one cut", id="empty"),
+        pytest.param(" , ", "At least one cut", id="separators_only"),
+        pytest.param("142, abc", "integers", id="not_integer"),
+        pytest.param("142.5", "integers", id="float"),
+        pytest.param("161, 142", "strictly increasing", id="decreasing"),
+        pytest.param("142, 142", "strictly increasing", id="duplicate"),
+        pytest.param(f"{HR_FLOOR_BPM}", "strictly increasing", id="floor"),
+        pytest.param(f"{HR_CEIL_BPM}", "strictly increasing", id="ceiling"),
+    ],
+)
+def test_parse_cuts_rejects_invalid_text(text: str, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        parse_cuts(text)
 
 
 # --- cuts_to_zones

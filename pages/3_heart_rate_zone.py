@@ -46,6 +46,10 @@ logger = logging.getLogger(__name__)
 # pages/2_dataset_features.py.
 DATASET_KEY = "app_dataset"
 DATASET_PARAMS_KEY = "app_dataset_params"
+# Optimised zones added to the dataset ({label: cuts}) and the zones chosen for
+# it (None: typed cuts); keep in sync with pages/2_dataset_features.py.
+ZONES_KEY = "app_heart_rate_zones"
+ZONES_CHOICE_KEY = "app_heart_rate_zones_choice"
 # Last optimisation run (or reloaded) from the form of this page.
 RUN_KEY = "heart_rate_last_run"
 
@@ -341,7 +345,7 @@ def render_summary(
     trials: pd.DataFrame,
     plot: PlotHeartRate,
     reference: tuple[float, float] | None,
-) -> None:
+) -> list[int]:
     """Render the key metrics and the summary table of each zone count.
 
     Parameters
@@ -352,6 +356,12 @@ def render_summary(
         Plotting interface of the trials.
     reference : tuple of (float, float) or None
         RMSE and standard error of the reference zones, if computed.
+
+    Returns
+    -------
+    list of int
+        Cuts, in bpm, of the best trial of the number of zones chosen by the
+        one-standard-error rule.
     """
     reference_rmse = None if reference is None else reference[0]
     summary = summarize_zone_counts(trials, plot.best_trials, reference_rmse)
@@ -401,6 +411,42 @@ def render_summary(
             ),
         },
     )
+    return [int(cut) for cut in chosen["cuts"]]
+
+
+def _add_zones(label: str, cuts: list[int]) -> None:
+    st.session_state[ZONES_KEY][label] = cuts
+    st.session_state[ZONES_CHOICE_KEY] = label
+
+
+def render_add_zones_button(selected: SavedHeartRateResult, cuts: list[int]) -> None:
+    """Render the button adding the chosen zones to the dataset of the app.
+
+    The zones are offered in the "Dataset / Features" page and chosen there
+    for the dataset.
+
+    Parameters
+    ----------
+    selected : SavedHeartRateResult
+        Optimisation the zones come from.
+    cuts : list of int
+        Cuts of the zones, in bpm.
+    """
+    label = (
+        f"N={len(cuts) + 1} · {selected.target_name} · "
+        f"{_format_dataset(selected)} · {selected.config.key}"
+    )
+    st.button(
+        "Ajouter ces zones dans le dataset",
+        on_click=_add_zones,
+        args=(label, cuts),
+        key=f"heart-rate-add-zones-{label}",
+    )
+    if st.session_state[ZONES_CHOICE_KEY] == label:
+        st.success(
+            "Zones utilisées par le dataset de la page « Dataset / Features » "
+            f"({label})."
+        )
 
 
 def _format_zones(cuts: list[int]) -> str:
@@ -472,7 +518,8 @@ def render_results(
         return
 
     st.caption(f"Modèle : {format_label(selected)}")
-    render_summary(trials, plot, reference)
+    cuts = render_summary(trials, plot, reference)
+    render_add_zones_button(selected, cuts)
     _render_chart(
         "Meilleur essai par N",
         plot.best_zones_per_n,
@@ -496,6 +543,10 @@ def main() -> None:
     st.title("Zones cardiaques")
     if RUN_KEY not in st.session_state:
         st.session_state[RUN_KEY] = None
+    if ZONES_KEY not in st.session_state:
+        st.session_state[ZONES_KEY] = {}
+    if ZONES_CHOICE_KEY not in st.session_state:
+        st.session_state[ZONES_CHOICE_KEY] = None
 
     dataset: Dataset | None = st.session_state.get(DATASET_KEY)
     dataset_params = st.session_state.get(DATASET_PARAMS_KEY)

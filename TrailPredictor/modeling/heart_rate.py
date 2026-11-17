@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
@@ -40,6 +41,7 @@ HR_FLOOR_BPM, HR_CEIL_BPM = 0, 250  # extreme values of the heart rate (bpm)
 MIN_ZONES = 2  # at least one cut
 REFERENCE_CUTS = [142, 161, 170, 183]
 TRIAL_STATES = ["COMPLETE", "PRUNED"]  # trial states counted in the summary
+CUTS_SEPARATORS = re.compile(r"[,;\s]+")  # between the cuts typed by the user
 
 
 def cuts_to_zones(cuts: Sequence[int]) -> dict[str, tuple[int, int]]:
@@ -74,6 +76,45 @@ def cuts_to_zones(cuts: Sequence[int]) -> dict[str, tuple[int, int]]:
             f"({HR_FLOOR_BPM}, {HR_CEIL_BPM}) bpm: {list(cuts)}"
         )
     return {f"Z{k}": (low, high) for k, (low, high) in enumerate(pairwise(bounds))}
+
+
+def parse_cuts(text: str) -> list[int]:
+    """Parse zone cuts typed as text, e.g. ``"142, 161, 170"``.
+
+    Parameters
+    ----------
+    text : str
+        Integer cuts, in bpm, separated by commas, semicolons or spaces.
+
+    Returns
+    -------
+    list of int
+        Cuts, valid input of ``cuts_to_zones``.
+
+    Raises
+    ------
+    ValueError
+        If there is no cut, a cut is not an integer, or the cuts are not
+        strictly increasing within the bounds.
+
+    See Also
+    --------
+    cuts_to_zones : Convert the cuts into zones.
+
+    Examples
+    --------
+    >>> parse_cuts("142, 161;170 183")
+    [142, 161, 170, 183]
+    """
+    tokens = [token for token in CUTS_SEPARATORS.split(text) if token]
+    if not tokens:
+        raise ValueError("At least one cut is required.")
+    try:
+        cuts = [int(token) for token in tokens]
+    except ValueError as error:
+        raise ValueError(f"Cuts must be integers (bpm): {text!r}") from error
+    cuts_to_zones(cuts)  # raises if not strictly increasing within the bounds
+    return cuts
 
 
 def _check_ordered(bounds: tuple[int, int]) -> tuple[int, int]:
