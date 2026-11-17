@@ -74,6 +74,32 @@ def infer_segment_width(data: pd.DataFrame) -> float:
     return float(width)
 
 
+def dataset_name(min_distance: int, max_distance: int, segment_width: int) -> str:
+    """Return the name of the dataset loaded with these parameters.
+
+    Parameters
+    ----------
+    min_distance : int
+        Minimum activity distance, in km.
+    max_distance : int
+        Maximum activity distance, in km.
+    segment_width : int
+        Segment length, in metres.
+
+    Returns
+    -------
+    str
+        ``"dataset_<min_distance>_<max_distance>_<segment_width>"``, also the
+        name of the features CSV exported by ``Dataset.load``.
+
+    Examples
+    --------
+    >>> dataset_name(40, 60, 1000)
+    'dataset_40_60_1000'
+    """
+    return f"dataset_{min_distance}_{max_distance}_{segment_width}"
+
+
 # Most public members are read-only properties of a data container.
 class Dataset:  # pylint: disable=too-many-public-methods
     """Segments of several activities with their features and target.
@@ -86,6 +112,9 @@ class Dataset:  # pylint: disable=too-many-public-methods
         ``speed`` columns. It is not modified.
     target : Target, optional
         Name of the column to predict. Default is ``"pace"``.
+    name : str or None, optional
+        Human-readable name of the dataset, e.g. ``"dataset_40_60_1000"``;
+        unlike ``key``, it does not identify the data. Default is None.
 
     Raises
     ------
@@ -102,7 +131,9 @@ class Dataset:  # pylint: disable=too-many-public-methods
         self,
         dataset: pd.DataFrame,
         target: Target = "pace",
+        name: str | None = None,
     ):
+        self._name = name
         self._data = dataset.copy()
         self._segment_width = infer_segment_width(self._data)
         self._data = self._prepare_raw(self._data)
@@ -176,6 +207,11 @@ class Dataset:  # pylint: disable=too-many-public-methods
     def segment_width(self) -> float:
         """Segment width in meters."""
         return self._segment_width
+
+    @property
+    def name(self) -> str | None:
+        """Return the human-readable name of the dataset, if any."""
+        return self._name
 
     @property
     def data(self) -> pd.DataFrame:
@@ -369,9 +405,11 @@ class Dataset:  # pylint: disable=too-many-public-methods
         Returns
         -------
         train : Dataset
-            Training activities, with the same target.
+            Training activities, with the same target and the name suffixed
+            with ``"_train"`` (None if the dataset has no name).
         test : Dataset
-            Test activities, with the same target.
+            Test activities, with the same target and the name suffixed with
+            ``"_test"`` (None if the dataset has no name).
 
         See Also
         --------
@@ -379,7 +417,13 @@ class Dataset:  # pylint: disable=too-many-public-methods
         """
         train_data, test_data = split_test_train(self.data, test_size, random_state)
         target_name = self.target_name
-        return Dataset(train_data, target_name), Dataset(test_data, target_name)
+        return (
+            Dataset(train_data, target_name, name=self._suffixed_name("train")),
+            Dataset(test_data, target_name, name=self._suffixed_name("test")),
+        )
+
+    def _suffixed_name(self, suffix: str) -> str | None:
+        return None if self._name is None else f"{self._name}_{suffix}"
 
     def with_heart_rate_zones(
         self,
@@ -681,6 +725,7 @@ class Dataset:  # pylint: disable=too-many-public-methods
 
         COMPUTED_DIR.mkdir(parents=True, exist_ok=True)
         suffix = f"{min_distance}_{max_distance}_{segment_width}"
+        name = dataset_name(min_distance, max_distance, segment_width)
         raw_path = COMPUTED_DIR / f"raw_{suffix}.csv"
 
         # Only the slow part (reading the FIT files) is cached.
@@ -712,5 +757,5 @@ class Dataset:  # pylint: disable=too-many-public-methods
             raise ValueError(f"The dataset must contain the columns {sorted(missing)}.")
 
         if export_features:  # handy to inspect / use from R, not read back
-            dataset.to_csv(COMPUTED_DIR / f"dataset_{suffix}.csv", index=False)
-        return cls(dataset)
+            dataset.to_csv(COMPUTED_DIR / f"{name}.csv", index=False)
+        return cls(dataset, name=name)

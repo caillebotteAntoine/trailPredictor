@@ -6,7 +6,10 @@ import pandas as pd
 import pytest
 from conftest import CUSTOM_DROP_THRESHOLD, N_ACTIVITIES_SPLIT, TWO_ZONES
 
-from TrailPredictor.dataset import Dataset
+from TrailPredictor.dataset import Dataset, dataset_name
+
+DATASET_NAME = "trail"
+SPLIT_SEED = 0
 
 
 @pytest.fixture
@@ -152,3 +155,29 @@ def test_single_activity_has_key(dataset: pd.DataFrame) -> None:
 
 def test_key_changes_with_heart_rate_zones(ds: Dataset) -> None:
     assert ds.with_heart_rate_zones(TWO_ZONES).key != ds.key
+
+
+def test_dataset_name_from_load_parameters() -> None:
+    assert dataset_name(40, 60, 1000) == "dataset_40_60_1000"
+
+
+def test_name_defaults_to_none(ds: Dataset) -> None:
+    assert ds.name is None
+
+
+def test_split_test_train_suffixes_name(dataset: pd.DataFrame) -> None:
+    train, test = Dataset(dataset, name=DATASET_NAME).split_test_train(0.5, SPLIT_SEED)
+
+    assert (train.name, test.name) == (f"{DATASET_NAME}_train", f"{DATASET_NAME}_test")
+
+
+def test_split_test_train_keeps_missing_name(ds: Dataset) -> None:
+    train, test = ds.split_test_train(0.5, SPLIT_SEED)
+
+    assert (train.name, test.name) == (None, None)
+
+
+def test_with_heart_rate_zones_keeps_name(dataset: pd.DataFrame) -> None:
+    named = Dataset(dataset, name=DATASET_NAME)
+
+    assert named.with_heart_rate_zones(TWO_ZONES).name == DATASET_NAME
