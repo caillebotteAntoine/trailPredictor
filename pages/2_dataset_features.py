@@ -29,6 +29,11 @@ SELECTION_IN_SIDEBAR = False
 DATASET_KEY = "app_dataset"
 DATASET_PARAMS_KEY = "app_dataset_params"
 
+# Dataset loaded on this page, reused by the other pages (e.g. heart-rate
+# zones); keep in sync with pages/3_heart_rate_zone.py.
+DATASET_KEY = "app_dataset"
+DATASET_PARAMS_KEY = "app_dataset_params"
+
 # Streamlit récent : remplacer par {"width": "stretch"} si l'avertissement de
 # dépréciation de `use_container_width` gêne.
 STRETCH: dict[str, Any] = {"use_container_width": True}
@@ -476,7 +481,9 @@ def main() -> None:
     st.session_state[DATASET_KEY] = dataset
     st.session_state[DATASET_PARAMS_KEY] = params
 
-    st.sidebar.caption(f"{len(dataset.data)} lignes")
+    st.sidebar.write(
+        f"Cible courante : `{plot.target_name}` · {len(dataset.data)} lignes"
+    )
 
     # Le panneau de sélection est rendu AVANT les graphiques : ils lisent la
     # sélection à jour dans le même run.
