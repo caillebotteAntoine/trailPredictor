@@ -43,7 +43,9 @@ def test_cannot_instantiate_abstract_base(
 
 
 def test_result_path(model: LinearModeling, tmp_path: Path) -> None:
-    assert model.result_path == tmp_path / "linear" / "pace" / f"{model.config.key}.csv"
+    assert model.result_path == (
+        tmp_path / "linear" / model.dataset.key / "pace" / f"{model.config.key}.csv"
+    )
 
 
 def test_no_saved_result(model: LinearModeling) -> None:
@@ -64,9 +66,8 @@ def test_save_and_reload(model: LinearModeling, tmp_path: Path) -> None:
     assert reloaded.result is not None
     pd.testing.assert_frame_equal(reloaded.result, model.result)
     assert json.loads(path.with_suffix(".json").read_text()) == {
-        "seed": SEED,
-        "n_splits": N_SPLITS,
-        "test_size": TEST_SIZE,
+        "dataset_key": model.dataset.key,
+        "config": {"seed": SEED, "n_splits": N_SPLITS, "test_size": TEST_SIZE},
     }
 
 
@@ -77,6 +78,36 @@ def test_other_config_does_not_reload(model: LinearModeling, tmp_path: Path) -> 
     other = LinearModeling(model.dataset, ModelConfig(seed=0), models_dir=tmp_path)
 
     assert other.result is None
+
+
+def test_other_dataset_does_not_reload(
+    model: LinearModeling, dataset: pd.DataFrame, tmp_path: Path
+) -> None:
+    model.result = pd.DataFrame({"rmse": [0.5]})
+    model.save_result()
+    one_activity = dataset.loc[dataset["activity_id"] == 1].assign(
+        heart_rate=DEFAULT_HEART_RATE
+    )
+
+    other = LinearModeling(Dataset(one_activity), model.config, models_dir=tmp_path)
+
+    assert other.dataset.key != model.dataset.key
+    assert other.result is None
+
+
+def test_same_data_reloads_after_csv_round_trip(
+    model: LinearModeling, tmp_path: Path
+) -> None:
+    # the second loading of Dataset.load reads the raw data from a CSV cache
+    model.result = pd.DataFrame({"rmse": [0.5]})
+    model.save_result()
+    csv_path = tmp_path / "raw.csv"
+    model.dataset.data.to_csv(csv_path, index=False)
+
+    read_back = Dataset(pd.read_csv(csv_path))
+    reloaded = LinearModeling(read_back, model.config, models_dir=tmp_path)
+
+    assert reloaded.result is not None
 
 
 def test_cross_validate_one_score_per_fold(model: LinearModeling) -> None:

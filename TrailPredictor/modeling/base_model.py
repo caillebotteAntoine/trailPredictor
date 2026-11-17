@@ -1,5 +1,6 @@
 """Base class of the models: cross-validation and result persistence."""
 
+import json
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -27,8 +28,9 @@ class BaseModeling[ConfigT: ModelConfig](ABC):
 
     The model holds a reference to the dataset (composition) and never
     modifies it. Its result is stored as a CSV file keyed by the model name,
-    the target and the configuration hash, with the configuration dumped as
-    JSON next to it.
+    the dataset hash, the target and the configuration hash, with the dataset
+    hash and the configuration dumped as JSON next to it. A result is thus
+    only reloaded for the very data it was computed on.
 
     Parameters
     ----------
@@ -68,22 +70,30 @@ class BaseModeling[ConfigT: ModelConfig](ABC):
 
     @property
     def result_path(self) -> Path:
-        """Return the CSV file of the result of this configuration.
+        """Return the CSV file of the result of this dataset and configuration.
 
         Returns
         -------
         pathlib.Path
-            ``<models_dir>/<name>/<target>/<config key>.csv``.
+            ``<models_dir>/<name>/<dataset key>/<target>/<config key>.csv``.
+
+        See Also
+        --------
+        TrailPredictor.dataset.Dataset.key : Hash of the data of the dataset.
         """
         return (
             self._models_dir
             / self.name
+            / self._dataset.key
             / self._dataset.target_name
             / f"{self._config.key}.csv"
         )
 
     def save_result(self) -> Path:
-        """Save the result as CSV and the configuration as JSON next to it.
+        """Save the result as CSV, and its metadata as JSON next to it.
+
+        The JSON file holds the dataset key and the configuration, so a
+        result can be traced back to the data it was computed on.
 
         Returns
         -------
@@ -100,17 +110,22 @@ class BaseModeling[ConfigT: ModelConfig](ABC):
         path = self.result_path
         path.parent.mkdir(parents=True, exist_ok=True)
         self.result.to_csv(path, index=False)
-        path.with_suffix(".json").write_text(self._config.model_dump_json(indent=2))
-        logger.info("Result saved to %s", path)
+        metadata = {
+            "dataset_key": self._dataset.key,
+            "config": self._config.model_dump(mode="json"),
+        }
+        path.with_suffix(".json").write_text(json.dumps(metadata, indent=2))
+        logger.info("Result saved to %s (dataset %s)", path, metadata["dataset_key"])
         return path
 
     def load_result(self) -> pd.DataFrame | None:
-        """Load the saved result of this configuration.
+        """Load the saved result of this dataset and configuration.
 
         Returns
         -------
         pandas.DataFrame or None
-            Saved result, or None if this configuration has not been run.
+            Saved result, or None if this configuration has not been run on
+            this dataset.
         """
         path = self.result_path
         if not path.exists():
