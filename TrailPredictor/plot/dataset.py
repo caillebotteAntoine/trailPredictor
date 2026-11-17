@@ -199,7 +199,7 @@ class PlotDataset(Dataset):
         )
         # add unity line
         fig.add_trace(
-            go.Line(
+            go.Scatter(
                 x=[self.prediction.min(), self.prediction.max()],
                 y=[self.prediction.min(), self.prediction.max()],
                 mode="lines",
