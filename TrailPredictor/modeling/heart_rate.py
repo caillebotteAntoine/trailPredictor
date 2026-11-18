@@ -1,6 +1,8 @@
 """Optimisation of the heart-rate zone cuts with Optuna."""
 
+import json
 import logging
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
@@ -39,6 +41,7 @@ HR_FLOOR_BPM, HR_CEIL_BPM = 0, 250  # extreme values of the heart rate (bpm)
 MIN_ZONES = 2  # at least one cut
 REFERENCE_CUTS = [142, 161, 170, 183]
 TRIAL_STATES = ["COMPLETE", "PRUNED"]  # trial states counted in the summary
+CUTS_SEPARATORS = re.compile(r"[,;\s]+")  # between the cuts typed by the user
 
 
 def cuts_to_zones(cuts: Sequence[int]) -> dict[str, tuple[int, int]]:
@@ -73,6 +76,45 @@ def cuts_to_zones(cuts: Sequence[int]) -> dict[str, tuple[int, int]]:
             f"({HR_FLOOR_BPM}, {HR_CEIL_BPM}) bpm: {list(cuts)}"
         )
     return {f"Z{k}": (low, high) for k, (low, high) in enumerate(pairwise(bounds))}
+
+
+def parse_cuts(text: str) -> list[int]:
+    """Parse zone cuts typed as text, e.g. ``"142, 161, 170"``.
+
+    Parameters
+    ----------
+    text : str
+        Integer cuts, in bpm, separated by commas, semicolons or spaces.
+
+    Returns
+    -------
+    list of int
+        Cuts, valid input of ``cuts_to_zones``.
+
+    Raises
+    ------
+    ValueError
+        If there is no cut, a cut is not an integer, or the cuts are not
+        strictly increasing within the bounds.
+
+    See Also
+    --------
+    cuts_to_zones : Convert the cuts into zones.
+
+    Examples
+    --------
+    >>> parse_cuts("142, 161;170 183")
+    [142, 161, 170, 183]
+    """
+    tokens = [token for token in CUTS_SEPARATORS.split(text) if token]
+    if not tokens:
+        raise ValueError("At least one cut is required.")
+    try:
+        cuts = [int(token) for token in tokens]
+    except ValueError as error:
+        raise ValueError(f"Cuts must be integers (bpm): {text!r}") from error
+    cuts_to_zones(cuts)  # raises if not strictly increasing within the bounds
+    return cuts
 
 
 def _check_ordered(bounds: tuple[int, int]) -> tuple[int, int]:
@@ -389,20 +431,26 @@ class SavedHeartRateResult:
         Configuration of the optimisation, read from its JSON dump.
     result_path : pathlib.Path
         CSV file of the trials.
+    dataset_key : str
+        Hash of the dataset the optimisation was run on (see ``Dataset.key``).
+    dataset_name : str or None, optional
+        Name of that dataset, if it had one. Default is None.
     """
 
     target_name: Target
     config: HeartRateConfig
     result_path: Path
+    dataset_key: str
+    dataset_name: str | None = None
 
 
 def list_saved_results(models_dir: Path = MODELS_DIR) -> list[SavedHeartRateResult]:
     """List the saved heart-rate zone optimisations.
 
-    A result is listed when its CSV file and its JSON configuration both
-    exist under ``<models_dir>/heart_rate/<target>/``. Configurations that
-    cannot be read (e.g. saved by an older version of the code) are skipped
-    and logged.
+    A result is listed when its CSV file and its JSON metadata both exist
+    under ``<models_dir>/heart_rate/<dataset key>/<target>/``. Metadata that
+    cannot be read (e.g. saved by an older version of the code, as a bare
+    configuration) are skipped and logged.
 
     Parameters
     ----------
@@ -412,28 +460,40 @@ def list_saved_results(models_dir: Path = MODELS_DIR) -> list[SavedHeartRateResu
     Returns
     -------
     list of SavedHeartRateResult
-        Saved results, sorted by target then configuration key; empty when
-        nothing is saved.
+        Saved results, sorted by dataset key, target then configuration key;
+        empty when nothing is saved.
 
     See Also
     --------
     BaseModeling.save_result : Writes the CSV and JSON files.
     """
     saved = []
+    model_dir = models_dir / ModelingHeartRate.name
     # loop over the saved files, not over the data
-    for config_path in sorted((models_dir / ModelingHeartRate.name).glob("*/*.json")):
-        result_path = config_path.with_suffix(".csv")
-        target_name = config_path.parent.name
+    for metadata_path in sorted(model_dir.glob("*/*/*.json")):
+        result_path = metadata_path.with_suffix(".csv")
+        target_name = metadata_path.parent.name
         if not result_path.exists() or target_name not in TARGETS:
-            logger.warning("Skipping %s: no CSV result or unknown target", config_path)
+            logger.warning(
+                "Skipping %s: no CSV result or unknown target", metadata_path
+            )
             continue
         try:
-            config = HeartRateConfig.model_validate_json(config_path.read_text())
-        except ValidationError:
-            logger.exception("Skipping %s: invalid configuration", config_path)
+            metadata = json.loads(metadata_path.read_text())
+            config = HeartRateConfig.model_validate(metadata["config"])
+            dataset_name = metadata.get("dataset_name")
+        # TypeError / KeyError: valid JSON, but not the metadata of save_result
+        except (json.JSONDecodeError, KeyError, TypeError, ValidationError):
+            logger.exception("Skipping %s: invalid metadata", metadata_path)
             continue
         saved.append(
-            SavedHeartRateResult(cast(Target, target_name), config, result_path)
+            SavedHeartRateResult(
+                cast(Target, target_name),
+                config,
+                result_path,
+                dataset_key=metadata_path.parent.parent.name,
+                dataset_name=dataset_name,
+            )
         )
     return saved
 

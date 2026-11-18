@@ -19,6 +19,7 @@ import pandas as pd
 import streamlit as st
 
 from TrailPredictor.dataset import Dataset
+from TrailPredictor.modeling.heart_rate import REFERENCE_CUTS, cuts_to_zones, parse_cuts
 from TrailPredictor.plot import PlotDataset
 from TrailPredictor.speed_columns import TARGETS, Target
 
@@ -28,6 +29,11 @@ SELECTION_IN_SIDEBAR = False
 # zones); keep in sync with pages/3_heart_rate_zone.py.
 DATASET_KEY = "app_dataset"
 DATASET_PARAMS_KEY = "app_dataset_params"
+# Optimised zones added from pages/3_heart_rate_zone.py ({label: cuts}) and the
+# zones chosen for the dataset (None: typed cuts); keep in sync with that page.
+ZONES_KEY = "app_heart_rate_zones"
+ZONES_CHOICE_KEY = "app_heart_rate_zones_choice"
+TYPED_ZONES = "Saisie libre"
 
 # Dataset loaded on this page, reused by the other pages (e.g. heart-rate
 # zones); keep in sync with pages/3_heart_rate_zone.py.
@@ -452,11 +458,57 @@ def render_charts(plot: PlotDataset) -> None:
 
 
 # --------------------------------------------------------------------------- #
+#                                ZONES CARDIAQUES
+# --------------------------------------------------------------------------- #
+def render_zones_sidebar() -> list[int]:
+    """Render the choice of the heart-rate zones of the dataset.
+
+    The cuts are typed (default ``REFERENCE_CUTS``) or picked among the
+    optimised zones added from the "Zones cardiaques" page.
+
+    Returns
+    -------
+    list of int
+        Chosen cuts, in bpm.
+
+    Raises
+    ------
+    ValueError
+        If the typed cuts are invalid.
+    """
+    saved_zones: dict[str, list[int]] = st.session_state[ZONES_KEY]
+    options = [TYPED_ZONES, *saved_zones]
+    choice = st.session_state[ZONES_CHOICE_KEY]
+    choice = st.sidebar.selectbox(
+        "Zones cardiaques",
+        options,
+        index=options.index(choice) if choice in saved_zones else 0,
+        help="Zones optimisées : ajoutez-les depuis la page « Zones cardiaques ».",
+    )
+    st.session_state[ZONES_CHOICE_KEY] = None if choice == TYPED_ZONES else choice
+    if choice == TYPED_ZONES:
+        typed = st.sidebar.text_input(
+            "Seuils des zones (bpm)",
+            value=", ".join(map(str, REFERENCE_CUTS)),
+            key="dataset_zone_cuts",
+            help="Seuils croissants séparés par des virgules : N seuils → N+1 zones.",
+        )
+        return parse_cuts(typed)
+    cuts = saved_zones[choice]
+    st.sidebar.caption("Seuils : " + ", ".join(map(str, cuts)) + " bpm")
+    return cuts
+
+
+# --------------------------------------------------------------------------- #
 #                                    PAGE
 # --------------------------------------------------------------------------- #
 def main() -> None:
     """Render the dataset exploration page."""
     st.title("Dataset / Features")
+    if ZONES_KEY not in st.session_state:
+        st.session_state[ZONES_KEY] = {}
+    if ZONES_CHOICE_KEY not in st.session_state:
+        st.session_state[ZONES_CHOICE_KEY] = None
     st.sidebar.subheader("Paramètres du dataset")
     min_distance = st.sidebar.number_input(
         "Distance minimale (km)", min_value=1, max_value=200, value=40, step=1
@@ -468,9 +520,18 @@ def main() -> None:
         "Taille des segments (m)", min_value=100, max_value=5000, value=1000, step=100
     )
     target_name = st.sidebar.selectbox("Cible", TARGETS, index=0)
+    try:
+        cuts = render_zones_sidebar()
+    except ValueError as error:
+        st.sidebar.error(f"Seuils invalides : {error}")
+        return
     params = (int(min_distance), int(max_distance), int(segment_width))
     try:
-        dataset = load_dataset(*params).with_target(target_name)
+        dataset = (
+            load_dataset(*params)
+            .with_target(target_name)
+            .with_heart_rate_zones(cuts_to_zones(cuts))
+        )
         plot = dataset.plot
         correlations = correlation_table(*params, target_name)
     # UI boundary: any loading failure is shown instead of crashing the page.

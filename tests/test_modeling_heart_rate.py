@@ -19,6 +19,7 @@ from TrailPredictor.modeling.heart_rate import (
     OneSeSelection,
     cuts_to_zones,
     list_saved_results,
+    parse_cuts,
     select_n_zones_one_se,
     suggest_cuts,
     summarize_zone_counts,
@@ -26,6 +27,7 @@ from TrailPredictor.modeling.heart_rate import (
 from TrailPredictor.modeling.models import Modeling
 
 N_SPLITS = 2  # the test dataset holds two activities
+DATASET_NAME = "dataset_40_60_1000"
 
 
 @pytest.fixture(autouse=True)
@@ -46,6 +48,40 @@ def model(
     dataset: pd.DataFrame, config: HeartRateConfig, tmp_path: Path
 ) -> ModelingHeartRate:
     return ModelingHeartRate(Dataset(dataset), config, models_dir=tmp_path)
+
+
+# --- parse_cuts
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        pytest.param("142, 161, 170, 183", REFERENCE_CUTS, id="commas"),
+        pytest.param("142;161 170\t183", REFERENCE_CUTS, id="mixed_separators"),
+        pytest.param("  150  ", [150], id="single_cut"),
+        pytest.param("142,,161,", [142, 161], id="empty_tokens"),
+    ],
+)
+def test_parse_cuts(text: str, expected: list[int]) -> None:
+    assert parse_cuts(text) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        pytest.param("", "At least one cut", id="empty"),
+        pytest.param(" , ", "At least one cut", id="separators_only"),
+        pytest.param("142, abc", "integers", id="not_integer"),
+        pytest.param("142.5", "integers", id="float"),
+        pytest.param("161, 142", "strictly increasing", id="decreasing"),
+        pytest.param("142, 142", "strictly increasing", id="duplicate"),
+        pytest.param(f"{HR_FLOOR_BPM}", "strictly increasing", id="floor"),
+        pytest.param(f"{HR_CEIL_BPM}", "strictly increasing", id="ceiling"),
+    ],
+)
+def test_parse_cuts_rejects_invalid_text(text: str, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        parse_cuts(text)
 
 
 # --- cuts_to_zones
@@ -247,6 +283,8 @@ def test_list_saved_results_finds_saved_model(
     assert saved[0].target_name == model.dataset.target_name
     assert saved[0].config == model.config
     assert saved[0].result_path == model.result_path
+    assert saved[0].dataset_key == model.dataset.key
+    assert saved[0].dataset_name is None
 
 
 def test_list_saved_results_skips_invalid_files(
@@ -255,17 +293,39 @@ def test_list_saved_results_skips_invalid_files(
     model.result = pd.DataFrame({"n_zones": [2]})
     model.save_result()
     target_dir = model.result_path.parent
-    (target_dir / "no_csv.json").write_text(model.config.model_dump_json())
-    (target_dir / "bad.json").write_text('{"unknown_field": 1}')
-    (target_dir / "bad.csv").write_text("n_zones\n2\n")
-    unknown_target = tmp_path / ModelingHeartRate.name / "not_a_target"
+    metadata = model.result_path.with_suffix(".json").read_text()
+    invalid_files = {
+        "bad_config": '{"config": {"unknown_field": 1}}',
+        "bare_config": model.config.model_dump_json(),  # format before the hash
+        "not_json": "{",
+        "not_a_dict": "[]",
+    }
+    for stem, content in invalid_files.items():
+        (target_dir / f"{stem}.json").write_text(content)
+        (target_dir / f"{stem}.csv").write_text("n_zones\n2\n")
+    (target_dir / "no_csv.json").write_text(metadata)
+    unknown_target = target_dir.parent / "not_a_target"
     unknown_target.mkdir()
-    (unknown_target / "key.json").write_text(model.config.model_dump_json())
+    (unknown_target / "key.json").write_text(metadata)
     (unknown_target / "key.csv").write_text("n_zones\n2\n")
 
     saved = list_saved_results(tmp_path)
 
     assert [s.result_path for s in saved] == [model.result_path]
+
+
+def test_list_saved_results_reads_dataset_name(
+    dataset: pd.DataFrame, config: HeartRateConfig, tmp_path: Path
+) -> None:
+    named = ModelingHeartRate(
+        Dataset(dataset, name=DATASET_NAME), config, models_dir=tmp_path
+    )
+    named.result = pd.DataFrame({"n_zones": [2]})
+    named.save_result()
+
+    saved = list_saved_results(tmp_path)
+
+    assert [s.dataset_name for s in saved] == [DATASET_NAME]
 
 
 # --- summarize_zone_counts

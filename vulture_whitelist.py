@@ -1,7 +1,7 @@
 """Vulture whitelist: code used outside the scanned paths, or false positives.
 
 Vulture only scans ``TrailPredictor``, ``pages`` and ``app.py``, so the API
-called from the notebooks (``main.ipynb``, ``prediction_from_gpx.ipynb``)
+called from the notebooks (``notebooks/*.ipynb``)
 looks unused. Each line below marks a name as used; remove it when the
 notebooks stop using it.
 """
