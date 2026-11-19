@@ -46,9 +46,8 @@ logger = logging.getLogger(__name__)
 # pages/2_dataset_features.py.
 DATASET_KEY = "app_dataset"
 DATASET_PARAMS_KEY = "app_dataset_params"
-# Optimised zones added to the dataset ({label: cuts}) and the zones chosen for
-# it (None: typed cuts); keep in sync with pages/2_dataset_features.py.
-ZONES_KEY = "app_heart_rate_zones"
+# Zones chosen for the dataset of pages/2_dataset_features.py: CSV path of a
+# saved optimisation, or None for typed cuts (keep in sync with that page).
 ZONES_CHOICE_KEY = "app_heart_rate_zones_choice"
 # Last optimisation run (or reloaded) from the form of this page.
 RUN_KEY = "heart_rate_last_run"
@@ -414,38 +413,35 @@ def render_summary(
     return [int(cut) for cut in chosen["cuts"]]
 
 
-def _add_zones(label: str, cuts: list[int]) -> None:
-    st.session_state[ZONES_KEY][label] = cuts
-    st.session_state[ZONES_CHOICE_KEY] = label
+def _choose_zones(choice: str) -> None:
+    st.session_state[ZONES_CHOICE_KEY] = choice
 
 
 def render_add_zones_button(selected: SavedHeartRateResult, cuts: list[int]) -> None:
-    """Render the button adding the chosen zones to the dataset of the app.
+    """Render the button choosing these zones for the dataset of the app.
 
-    The zones are offered in the "Dataset / Features" page and chosen there
-    for the dataset.
+    The saved optimisations are all offered in the "Dataset / Features" page;
+    the button selects this one there.
 
     Parameters
     ----------
     selected : SavedHeartRateResult
         Optimisation the zones come from.
     cuts : list of int
-        Cuts of the zones, in bpm.
+        Cuts of the zones, in bpm, shown in the confirmation.
     """
-    label = (
-        f"N={len(cuts) + 1} · {selected.target_name} · "
-        f"{_format_dataset(selected)} · {selected.config.key}"
-    )
+    choice = str(selected.result_path)
     st.button(
         "Ajouter ces zones dans le dataset",
-        on_click=_add_zones,
-        args=(label, cuts),
-        key=f"heart-rate-add-zones-{label}",
+        on_click=_choose_zones,
+        args=(choice,),
+        key=f"heart-rate-add-zones-{choice}",
     )
-    if st.session_state[ZONES_CHOICE_KEY] == label:
+    if st.session_state[ZONES_CHOICE_KEY] == choice:
         st.success(
-            "Zones utilisées par le dataset de la page « Dataset / Features » "
-            f"({label})."
+            "Zones utilisées par le dataset de la page « Dataset / Features » : "
+            + ", ".join(map(str, cuts))
+            + " bpm."
         )
 
 
@@ -543,8 +539,6 @@ def main() -> None:
     st.title("Zones cardiaques")
     if RUN_KEY not in st.session_state:
         st.session_state[RUN_KEY] = None
-    if ZONES_KEY not in st.session_state:
-        st.session_state[ZONES_KEY] = {}
     if ZONES_CHOICE_KEY not in st.session_state:
         st.session_state[ZONES_CHOICE_KEY] = None
 

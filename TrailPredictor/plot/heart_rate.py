@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Sequence
+from typing import cast
 
 import numpy as np
 import numpy.typing as npt
@@ -14,6 +15,7 @@ from TrailPredictor.modeling.heart_rate import (
     HR_FLOOR_BPM,
     REFERENCE_CUTS,
     ModelingHeartRate,
+    select_n_zones_one_se,
 )
 from TrailPredictor.plot._common import CATEGORICAL_COLORS, _base_layout
 
@@ -147,6 +149,31 @@ class PlotHeartRate:
             .set_index("n_zones")
             .sort_index()
         )
+
+    @property
+    def one_se_cuts(self) -> list[int]:
+        """Return the cuts of the zones chosen by the one-standard-error rule.
+
+        Returns
+        -------
+        list of int
+            Cuts, in bpm, of the best trial of the number of zones selected by
+            ``select_n_zones_one_se`` among the best trials.
+
+        Raises
+        ------
+        ValueError
+            If no completed trial has a finite RMSE.
+
+        See Also
+        --------
+        TrailPredictor.modeling.heart_rate.select_n_zones_one_se : The rule.
+        """
+        best = self.best_trials
+        selection = select_n_zones_one_se(best)
+        # the constructor parsed every "cuts" cell into a list of int
+        cuts = cast(list[int], best.loc[selection.n_zones, "cuts"])
+        return [int(cut) for cut in cuts]
 
     # ================================================================================= #
     #                                  SHARED HELPERS

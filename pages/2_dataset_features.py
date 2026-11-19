@@ -11,6 +11,7 @@ Set ``SELECTION_IN_SIDEBAR = True`` to put the panel in the sidebar instead.
 from __future__ import annotations
 
 import hashlib
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -19,9 +20,17 @@ import pandas as pd
 import streamlit as st
 
 from TrailPredictor.dataset import Dataset
-from TrailPredictor.modeling.heart_rate import REFERENCE_CUTS, cuts_to_zones, parse_cuts
-from TrailPredictor.plot import PlotDataset
+from TrailPredictor.modeling.heart_rate import (
+    REFERENCE_CUTS,
+    SavedHeartRateResult,
+    cuts_to_zones,
+    list_saved_results,
+    parse_cuts,
+)
+from TrailPredictor.plot import PlotDataset, PlotHeartRate
 from TrailPredictor.speed_columns import TARGETS, Target
+
+logger = logging.getLogger(__name__)
 
 SELECTION_IN_SIDEBAR = False
 
@@ -29,9 +38,9 @@ SELECTION_IN_SIDEBAR = False
 # zones); keep in sync with pages/3_heart_rate_zone.py.
 DATASET_KEY = "app_dataset"
 DATASET_PARAMS_KEY = "app_dataset_params"
-# Optimised zones added from pages/3_heart_rate_zone.py ({label: cuts}) and the
-# zones chosen for the dataset (None: typed cuts); keep in sync with that page.
-ZONES_KEY = "app_heart_rate_zones"
+# Zones chosen for the dataset: CSV path of a saved heart-rate optimisation, or
+# None for the typed cuts; also set by the button of pages/3_heart_rate_zone.py
+# (keep in sync).
 ZONES_CHOICE_KEY = "app_heart_rate_zones_choice"
 TYPED_ZONES = "Saisie libre"
 
@@ -455,11 +464,46 @@ def render_charts(plot: PlotDataset) -> None:
 # --------------------------------------------------------------------------- #
 #                                ZONES CARDIAQUES
 # --------------------------------------------------------------------------- #
+@st.cache_data(ttl=60)
+def saved_zone_options() -> dict[str, tuple[str, list[int]]]:
+    """List the zones of the saved heart-rate optimisations (cached one minute).
+
+    Results whose trials cannot be read, or hold no completed trial, are
+    skipped and logged.
+
+    Returns
+    -------
+    dict[str, tuple[str, list[int]]]
+        CSV path of each saved optimisation mapped to its selector label and
+        the cuts, in bpm, chosen by the one-standard-error rule.
+    """
+    options: dict[str, tuple[str, list[int]]] = {}
+    # loop over the saved files, not over the data
+    for saved in list_saved_results():
+        try:
+            trials = pd.read_csv(saved.result_path)
+            cuts = PlotHeartRate(trials, saved.target_name).one_se_cuts
+        except (OSError, ValueError, pd.errors.ParserError):
+            logger.exception("Skipping the zones of %s", saved.result_path)
+            continue
+        options[str(saved.result_path)] = (_zones_label(saved, cuts), cuts)
+    return options
+
+
+def _zones_label(saved: SavedHeartRateResult, cuts: list[int]) -> str:
+    dataset = (
+        saved.dataset_key
+        if saved.dataset_name is None
+        else f"{saved.dataset_name} ({saved.dataset_key})"
+    )
+    return f"N={len(cuts) + 1} · {saved.target_name} · {dataset} · {saved.config.key}"
+
+
 def render_zones_sidebar() -> list[int]:
     """Render the choice of the heart-rate zones of the dataset.
 
-    The cuts are typed (default ``REFERENCE_CUTS``) or picked among the
-    optimised zones added from the "Zones cardiaques" page.
+    The cuts are typed (default ``REFERENCE_CUTS``) or taken from a saved
+    heart-rate optimisation (cuts of the one-standard-error rule).
 
     Returns
     -------
@@ -471,14 +515,19 @@ def render_zones_sidebar() -> list[int]:
     ValueError
         If the typed cuts are invalid.
     """
-    saved_zones: dict[str, list[int]] = st.session_state[ZONES_KEY]
-    options = [TYPED_ZONES, *saved_zones]
     choice = st.session_state[ZONES_CHOICE_KEY]
+    saved_zones = saved_zone_options()
+    if choice is not None and choice not in saved_zones:
+        saved_zone_options.clear()  # e.g. optimisation just run on the other page
+        saved_zones = saved_zone_options()
+    options = [TYPED_ZONES, *saved_zones]
     choice = st.sidebar.selectbox(
         "Zones cardiaques",
         options,
         index=options.index(choice) if choice in saved_zones else 0,
-        help="Zones optimisées : ajoutez-les depuis la page « Zones cardiaques ».",
+        format_func=lambda key: key if key == TYPED_ZONES else saved_zones[key][0],
+        help="Saisie libre, ou zones (règle 1-SE) d'une optimisation sauvegardée "
+        "depuis la page « Zones cardiaques ».",
     )
     st.session_state[ZONES_CHOICE_KEY] = None if choice == TYPED_ZONES else choice
     if choice == TYPED_ZONES:
@@ -489,7 +538,7 @@ def render_zones_sidebar() -> list[int]:
             help="Seuils croissants séparés par des virgules : N seuils → N+1 zones.",
         )
         return parse_cuts(typed)
-    cuts = saved_zones[choice]
+    cuts = saved_zones[choice][1]
     st.sidebar.caption("Seuils : " + ", ".join(map(str, cuts)) + " bpm")
     return cuts
 
@@ -500,8 +549,6 @@ def render_zones_sidebar() -> list[int]:
 def main() -> None:
     """Render the dataset exploration page."""
     st.title("Dataset / Features")
-    if ZONES_KEY not in st.session_state:
-        st.session_state[ZONES_KEY] = {}
     if ZONES_CHOICE_KEY not in st.session_state:
         st.session_state[ZONES_CHOICE_KEY] = None
     st.sidebar.subheader("Paramètres du dataset")

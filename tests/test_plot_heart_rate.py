@@ -53,6 +53,24 @@ def test_cuts_parsed_from_csv_strings(trials: pd.DataFrame) -> None:
     assert best.loc[3, "cuts"] == [140, 170]
 
 
+def test_one_se_cuts(plot: PlotHeartRate) -> None:
+    # N=3 has the lowest RMSE (0.28 ± 0.03): N=2 (0.30) is within one SE
+    assert plot.one_se_cuts == [140]
+
+
+def test_one_se_cuts_from_csv_strings(trials: pd.DataFrame) -> None:
+    from_csv = trials.assign(cuts=trials["cuts"].map(str))
+
+    assert PlotHeartRate(from_csv, TARGET_NAME).one_se_cuts == [140]
+
+
+def test_one_se_cuts_without_completed_trial_raises(trials: pd.DataFrame) -> None:
+    pruned = trials.assign(state="PRUNED")
+
+    with pytest.raises(ValueError, match="No trial"):
+        _ = PlotHeartRate(pruned, TARGET_NAME).one_se_cuts
+
+
 def test_best_trials(plot: PlotHeartRate) -> None:
     best = plot.best_trials
 
