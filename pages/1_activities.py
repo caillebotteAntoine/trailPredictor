@@ -15,6 +15,8 @@ from TrailPredictor.activities import RunningActivities
 from TrailPredictor.loading import load_activities
 from TrailPredictor.plot import PlotActivities
 
+TRACK_MAP_HEIGHT = 500  # px
+
 
 @st.cache_data
 def st_load_activities() -> pd.DataFrame:
@@ -151,6 +153,12 @@ def render_sidebar(activities: pd.DataFrame) -> tuple[pd.Series, dict[str, Any]]
             ["distance", "time"],
             format_func=lambda x: {"distance": "Distance", "time": "Temps"}[x],
         ),
+        "texture": st.sidebar.radio(
+            "Fond de la carte 3D",
+            ["osm", "satellite"],
+            format_func=lambda x: {"osm": "OpenStreetMap", "satellite": "Satellite"}[x],
+            horizontal=True,
+        ),
         "show_km_markers": st.sidebar.checkbox(
             "Afficher les repères kilométriques", True
         ),
@@ -193,17 +201,46 @@ def _render_chart(
     name: str,
     method: Callable[[], Any],
     key: str,
-    display_height: int | None = None,
     **kwargs: Any,
 ) -> None:
     try:
         figure = method(**kwargs)
-        if display_height is not None:
-            figure.update_layout(height=display_height)
         st.plotly_chart(figure, width="stretch", key=key)
     # UI boundary: any plotting failure is shown instead of crashing the page.
     except Exception as error:  # pylint: disable=broad-exception-caught
         st.warning(f"{name} : {error}")
+
+
+def render_track_map(plot: PlotActivities, options: dict[str, Any]) -> None:
+    """Render the 3D map of the GPS track and its colour legend.
+
+    Parameters
+    ----------
+    plot : PlotActivities
+        Activity to map.
+    options : dict[str, Any]
+        Display options chosen in the sidebar.
+    """
+    try:
+        track = plot.track_map(
+            color_by=options["color_by"],
+            show_km_markers=options["show_km_markers"],
+            texture=options["texture"],
+        )
+    # UI boundary: any plotting failure is shown instead of crashing the page.
+    except Exception as error:  # pylint: disable=broad-exception-caught
+        st.warning(f"Parcours GPS : {error}")
+        return
+    st.pydeck_chart(track.deck, height=TRACK_MAP_HEIGHT, key="track-map")
+    legend = track.legend
+    st.markdown(
+        f"**{legend.label}** &nbsp; {legend.vmin_text} "
+        f'<span style="display:inline-block;width:12rem;height:0.8rem;'
+        f'vertical-align:middle;background:{legend.css_gradient}"></span> '
+        f"{legend.vmax_text}",
+        unsafe_allow_html=True,
+    )
+    st.caption(f"{legend.attribution} · Elevation: AWS Terrain Tiles")
 
 
 def main() -> None:
@@ -232,14 +269,7 @@ def main() -> None:
         progress_bar.empty()
 
     render_metrics(plot)
-    _render_chart(
-        "Parcours GPS",
-        plot.track_map,
-        "track-map",
-        display_height=500,
-        color_by=options["color_by"],
-        show_km_markers=options["show_km_markers"],
-    )
+    render_track_map(plot, options)
     altitude, heart_rate = st.columns(2)
     with altitude:
         _render_chart("Altitude", plot.altitude, "altitude")

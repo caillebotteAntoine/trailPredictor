@@ -42,11 +42,12 @@ def test_pause_markers_on_paused_segments(make_plot, method: str) -> None:
 def test_pause_markers_on_track_map(make_plot) -> None:
     plot = make_plot([True, False, False, False, False])
 
-    traces = _pause_traces(plot.track_map(show_km_markers=False))
+    deck = plot.track_map(show_km_markers=False).deck
+    (pause_layer,) = [layer for layer in deck.layers if layer.id == "pauses"]
 
-    assert len(traces) == 1
-    np.testing.assert_allclose(traces[0].lat, [45.0])
-    np.testing.assert_allclose(traces[0].lon, [6.0])
+    assert len(pause_layer.data) == 1
+    lon, lat, _ = pause_layer.data[0]["position"]
+    assert (lat, lon) == pytest.approx((45.0, 6.0))
 
 
 def test_no_pause_markers_without_pause(make_plot) -> None:

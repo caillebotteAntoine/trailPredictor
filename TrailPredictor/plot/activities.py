@@ -1,6 +1,6 @@
 """Plotly figures for a single running activity."""
 
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from typing import Any, Literal, get_args
 
 import numpy as np
@@ -12,6 +12,7 @@ from plotly.subplots import make_subplots
 from TrailPredictor.activities import RunningActivities
 from TrailPredictor.features import HEART_RATE_ZONES, HearthRateZone, build_features
 from TrailPredictor.plot._common import TARGETS_UNITS, _base_layout
+from TrailPredictor.plot.track_3d import ColorBy, MapTexture, TrackMap, build_track_map
 from TrailPredictor.speed_columns import format_pace
 
 DropCategory = Literal["Uphill", "Downhill", "Flat"]
@@ -145,7 +146,6 @@ class PlotActivities(RunningActivities):
         fig: go.Figure,
         x: npt.ArrayLike,
         y: npt.ArrayLike,
-        trace_type: Callable[..., go.Scatter] = go.Scatter,
         **add_trace_kwargs: Any,
     ) -> None:
         """Overlay small markers on the segments flagged as pauses.
@@ -159,9 +159,6 @@ class PlotActivities(RunningActivities):
         x, y : array-like of shape (n,)
             Coordinates of every segment, aligned with the activity data;
             only the paused segments are drawn.
-        trace_type : callable, optional
-            Plotly trace class; ``go.Scatter`` by default. Map traces take
-            ``lat``/``lon`` instead of ``x``/``y``.
         **add_trace_kwargs
             Forwarded to ``fig.add_trace`` (e.g. ``row``, ``col``,
             ``secondary_y``).
@@ -169,21 +166,15 @@ class PlotActivities(RunningActivities):
         is_pause = self._data["pause"].to_numpy(dtype=bool)
         if not is_pause.any():
             return
-        x_pause = np.asarray(x)[is_pause]
-        y_pause = np.asarray(y)[is_pause]
-        is_map = trace_type is not go.Scatter
-        coordinates = (
-            {"lat": x_pause, "lon": y_pause} if is_map else {"x": x_pause, "y": y_pause}
-        )
         fig.add_trace(
-            trace_type(
-                **coordinates,
+            go.Scatter(
+                x=np.asarray(x)[is_pause],
+                y=np.asarray(y)[is_pause],
                 mode="markers",
                 marker={"color": PAUSE_COLOR, "size": PAUSE_MARKER_SIZE},
                 name="Pause",
                 legendgroup="pause",
-                hoverinfo="skip" if is_map else None,
-                hovertemplate=None if is_map else "Pause<extra></extra>",
+                hovertemplate="Pause<extra></extra>",
             ),
             **add_trace_kwargs,
         )
@@ -236,12 +227,14 @@ class PlotActivities(RunningActivities):
     # =================================================================================== #
     #                                   GPS TRACK PLOT
     # =================================================================================== #
-    def track_map(  # pylint: disable=too-many-locals
+    def track_map(
         self,
-        color_by: Literal["altitude", "heart_rate", "pace"] = "altitude",
+        color_by: ColorBy = "altitude",
         show_km_markers: bool = True,
-    ) -> go.Figure:
-        """Plot the GPS track on an OpenStreetMap background.
+        texture: MapTexture = "osm",
+        vertical_exaggeration: float = 1.0,
+    ) -> TrackMap:
+        """Plot the GPS track in 3D over the terrain.
 
         Parameters
         ----------
@@ -249,118 +242,34 @@ class PlotActivities(RunningActivities):
             Variable used to colour the track. Default is ``"altitude"``.
         show_km_markers : bool, optional
             Add a marker at each kilometre. Default is True.
+        texture : {"osm", "satellite"}, optional
+            Imagery draped over the terrain. Default is ``"osm"``.
+        vertical_exaggeration : float, optional
+            Factor applied to the elevation of the terrain and of the track.
+            Default is 1.0.
 
         Returns
         -------
-        plotly.graph_objects.Figure
-            Map of the track.
+        TrackMap
+            pydeck map of the track and its colour legend.
 
         Raises
         ------
         ValueError
-            If `color_by` is invalid or the activity has no valid GPS
+            If an argument is invalid or the activity has no valid GPS
             coordinates.
+
+        See Also
+        --------
+        TrailPredictor.plot.track_3d.build_track_map : Builds the map.
         """
-        data = self._data.copy()
-        latitude = data["position_lat"]
-        longitude = data["position_long"]
-        distance = data["distance"]
-
-        if color_by == "altitude":
-            values = data["altitude"]
-            label = "Altitude (m)"
-        elif color_by == "heart_rate":
-            values = data["heart_rate"]
-            label = "Heart Rate (bpm)"
-        elif color_by == "pace":
-            values = data["pace"]
-            label = "Pace (min/km)"
-        else:
-            raise ValueError("color_by must be 'altitude', 'heart_rate' or 'pace'")
-
-        finite = values.replace([np.inf, -np.inf], np.nan).dropna()
-        cmin, cmax = finite.quantile([0.05, 0.95]) if not finite.empty else (0, 1)
-        colorscale = "RdYlGn_r" if color_by == "pace" else "Viridis"
-        map_trace = go.Scattermap if hasattr(go, "Scattermap") else go.Scattermapbox
-        trace = {
-            "lat": latitude,
-            "lon": longitude,
-            "mode": "lines+markers",
-            "line": {"color": "#666666", "width": 2},
-            "marker": {
-                "color": values,
-                "colorscale": colorscale,
-                "cmin": cmin,
-                "cmax": cmax,
-                "size": 5,
-                "colorbar": {"title": label},
-            },
-            "customdata": np.column_stack((distance, values)),
-            "hovertemplate": (
-                "Distance : %{customdata[0]:.0f} m<br>"
-                f"{label} : %{{customdata[1]:.2f}}<extra></extra>"
-            ),
-            "name": "Parcours",
-        }
-        if latitude.notna().sum() < 2 or longitude.notna().sum() < 2:
-            raise ValueError("L'activité ne contient pas de coordonnées GPS valides.")
-        fig = _base_layout(go.Figure(map_trace(**trace)), "Parcours GPS", self.name)
-        map_options = {
-            "style": "open-street-map",
-            "center": {"lat": latitude.mean(), "lon": longitude.mean()},
-            "zoom": self._map_zoom(latitude, longitude),
-        }
-        if hasattr(go, "Scattermap"):
-            fig.update_layout(map=map_options)
-        else:
-            fig.update_layout(mapbox=map_options)
-
-        fig.add_trace(
-            map_trace(
-                lat=[latitude.iloc[0]],
-                lon=[longitude.iloc[0]],
-                mode="markers",
-                marker={"color": "#009E73", "size": 11},
-                name="Départ",
-            )
+        return build_track_map(
+            self._data,
+            color_by,
+            texture=texture,
+            show_km_markers=show_km_markers,
+            vertical_exaggeration=vertical_exaggeration,
         )
-        fig.add_trace(
-            map_trace(
-                lat=[latitude.iloc[-1]],
-                lon=[longitude.iloc[-1]],
-                mode="markers",
-                marker={"color": "#D55E00", "size": 11},
-                name="Arrivée",
-            )
-        )
-        self._add_pause_markers(fig, latitude, longitude, trace_type=map_trace)
-        if show_km_markers:
-            targets = np.arange(1000, distance.max(), 1000)
-            positions = np.asarray(
-                [np.abs(distance.to_numpy() - target).argmin() for target in targets],
-                dtype=int,
-            )
-            if len(positions):
-                fig.add_trace(
-                    map_trace(
-                        lat=latitude.iloc[positions],
-                        lon=longitude.iloc[positions],
-                        mode="markers+text",
-                        text=[f"km {index}" for index in range(1, len(positions) + 1)],
-                        textposition="top center",
-                        marker={"color": "#333333", "size": 7},
-                        name="Kilomètres",
-                    )
-                )
-        return fig
-
-    @staticmethod
-    def _map_zoom(latitude: pd.Series, longitude: pd.Series) -> float:
-        span = max(
-            float(latitude.max() - latitude.min()),
-            float(longitude.max() - longitude.min()),
-        )
-        return float(np.clip(11 - np.log2(max(span, 1e-5) / 0.05), 3, 15))
 
     # ================================================================================= #
     #                                   PACE PLOT
