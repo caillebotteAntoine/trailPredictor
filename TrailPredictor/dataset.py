@@ -663,13 +663,18 @@ class Dataset:  # pylint: disable=too-many-public-methods
 
         return PlotDataset(self)
 
-    def get_activities(self, activity_id: int):
+    def get_activities(self, activity_id: int, prediction: pd.Series | None = None):
         """Extract one activity, with its prediction when available.
 
         Parameters
         ----------
         activity_id : int
             Identifier of the activity in the ``activity_id`` column.
+        prediction : pandas.Series or None, optional
+            Prediction of every segment, indexed like ``data`` and named like
+            ``prediction_label``, used instead of the stored prediction (e.g.
+            an out-of-fold prediction), without modifying the dataset.
+            Default is None, meaning the stored prediction, if any.
 
         Returns
         -------
@@ -688,12 +693,14 @@ class Dataset:  # pylint: disable=too-many-public-methods
         if activity_data.empty:
             raise ValueError(f"No data found for activity_id {activity_id}")
 
-        prediction = (
-            self.prediction.loc[activity_data.index]
-            if self.prediction_label in self._data
-            else None
+        if prediction is None and self.prediction_label in self._data:
+            prediction = self.prediction
+        return RunningActivities(
+            activity_data,
+            prediction=None
+            if prediction is None
+            else prediction.loc[activity_data.index],
         )
-        return RunningActivities(activity_data, prediction=prediction)
 
     @staticmethod
     def _prepare_raw(raw: pd.DataFrame) -> pd.DataFrame:

@@ -10,6 +10,7 @@ import pandas as pd
 from sklearn import config_context
 from sklearn.base import RegressorMixin, TransformerMixin
 from sklearn.model_selection import GroupKFold
+from sklearn.model_selection import cross_val_predict as sklearn_cross_val_predict
 from sklearn.model_selection import cross_validate as sklearn_cross_validate
 from sklearn.pipeline import Pipeline
 
@@ -230,3 +231,43 @@ class BaseModeling[ConfigT: ModelConfig](ABC):
                 return_estimator=return_estimator,
                 error_score="raise",
             )
+
+    def cross_val_predict(self, dataset: Dataset | None = None) -> pd.Series:
+        """Predict every segment with the pipeline fitted on the other folds.
+
+        The folds are the ``GroupKFold`` folds of ``cross_validate``: each
+        activity is predicted by a pipeline that never saw it, so the
+        prediction is out-of-fold, not in-sample.
+
+        Parameters
+        ----------
+        dataset : Dataset or None, optional
+            Dataset to predict. Default is None, meaning the dataset of the
+            model.
+
+        Returns
+        -------
+        pandas.Series
+            Out-of-fold prediction of the target, indexed like
+            ``dataset.data`` and named ``dataset.prediction_label``.
+
+        See Also
+        --------
+        cross_validate : Same folds, returning the RMSE of each fold.
+        """
+        dataset = self._dataset if dataset is None else dataset
+        predictors = dataset.predictors
+        with config_context(enable_metadata_routing=True):
+            prediction = sklearn_cross_val_predict(
+                self.build_pipeline(dataset),
+                predictors,
+                dataset.target,
+                cv=GroupKFold(n_splits=self._config.n_splits),
+                params={"groups": dataset.data[GROUP_COLUMN]},
+            )
+        return pd.Series(
+            prediction,
+            index=predictors.index,
+            name=dataset.prediction_label,
+            dtype="float64",
+        )

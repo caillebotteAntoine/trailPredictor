@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 from conftest import CUSTOM_DROP_THRESHOLD, N_ACTIVITIES_SPLIT, TWO_ZONES
@@ -181,3 +182,48 @@ def test_with_heart_rate_zones_keeps_name(dataset: pd.DataFrame) -> None:
     named = Dataset(dataset, name=DATASET_NAME)
 
     assert named.with_heart_rate_zones(TWO_ZONES).name == DATASET_NAME
+
+
+# --- get_activities
+
+
+@pytest.fixture
+def first_id(ds: Dataset) -> int:
+    return int(ds.data["activity_id"].iloc[0])
+
+
+def test_get_activities_without_prediction(ds: Dataset, first_id: int) -> None:
+    with pytest.raises(ValueError, match="No prediction"):
+        _ = ds.get_activities(first_id).prediction
+
+
+def test_get_activities_uses_given_prediction(ds: Dataset, first_id: int) -> None:
+    data = ds.data
+    prediction = pd.Series(
+        np.arange(len(data), dtype=np.float64),
+        index=data.index,
+        name=ds.prediction_label,
+    )
+
+    activity = ds.get_activities(first_id, prediction)
+
+    in_activity = data["activity_id"] == first_id
+    pd.testing.assert_series_equal(activity.prediction, prediction[in_activity])
+    assert ds.prediction_label not in ds.data.columns  # dataset not modified
+
+
+def test_get_activities_given_prediction_overrides_stored(
+    ds: Dataset, first_id: int
+) -> None:
+    data = ds.data
+    ds.prediction = pd.Series(np.zeros(len(data)), index=data.index)
+    given = pd.Series(np.ones(len(data)), index=data.index, name=ds.prediction_label)
+
+    activity = ds.get_activities(first_id, given)
+
+    np.testing.assert_allclose(activity.prediction, 1.0)
+
+
+def test_get_activities_unknown_id(ds: Dataset) -> None:
+    with pytest.raises(ValueError, match="No data found"):
+        ds.get_activities(-1)

@@ -166,3 +166,24 @@ def test_cross_validate_does_not_modify_dataset(model: LinearModeling) -> None:
     model.cross_validate()
 
     pd.testing.assert_frame_equal(model.dataset.data, before)
+
+
+def test_cross_val_predict_is_out_of_fold(model: LinearModeling) -> None:
+    prediction = model.cross_val_predict()
+
+    assert prediction.name == model.dataset.prediction_label
+    pd.testing.assert_index_equal(prediction.index, model.dataset.data.index)
+    assert prediction.notna().all()
+    # each activity is predicted by a pipeline fitted on the other ones
+    in_sample = model.build_pipeline().fit(
+        model.dataset.predictors, model.dataset.target
+    )
+    assert not np.allclose(prediction, in_sample.predict(model.dataset.predictors))
+
+
+def test_cross_val_predict_does_not_modify_dataset(model: LinearModeling) -> None:
+    before = model.dataset.data
+
+    model.cross_val_predict()
+
+    pd.testing.assert_frame_equal(model.dataset.data, before)
