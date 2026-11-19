@@ -1,13 +1,15 @@
 """Feature selection with a Lasso, followed by a linear regression."""
 
+import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-from pydantic import Field, PositiveInt
+from pydantic import Field, PositiveInt, ValidationError
 from sklearn import config_context
 from sklearn.base import TransformerMixin
 from sklearn.feature_selection import SelectFromModel
@@ -19,10 +21,13 @@ from sklearn.preprocessing import StandardScaler
 from TrailPredictor.dataset import Dataset
 from TrailPredictor.modeling.base_model import GROUP_COLUMN, BaseModeling
 from TrailPredictor.modeling.config import MIN_SPLITS, ModelConfig
+from TrailPredictor.speed_columns import TARGETS, Target
 from TrailPredictor.utils import MODELS_DIR
 
 if TYPE_CHECKING:
     from TrailPredictor.plot.lasso import PlotLasso
+
+logger = logging.getLogger(__name__)
 
 SELECTION_COLUMNS = ["fold", "feature", "lasso_coef", "selected", "alpha", "rmse"]
 
@@ -398,3 +403,133 @@ def selection_frequency(selection: pd.DataFrame) -> pd.DataFrame:
         )
         .sort_values(["frequency", "mean_abs_coef"], ascending=False)
     )
+
+
+def summarize_folds(selection: pd.DataFrame) -> pd.DataFrame:
+    """Summarise a per-fold selection by outer fold.
+
+    Parameters
+    ----------
+    selection : pandas.DataFrame
+        One row per fold and feature, with the ``SELECTION_COLUMNS`` columns,
+        as ``ModelingLasso.result``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Indexed by ``fold``, with columns ``alpha`` (penalty chosen in the
+        fold), ``rmse`` (its test RMSE) and ``n_selected`` (its number of
+        selected features).
+
+    Raises
+    ------
+    ValueError
+        If a column is missing.
+
+    Examples
+    --------
+    >>> selection = pd.DataFrame(
+    ...     {
+    ...         "fold": [0, 0, 1, 1],
+    ...         "selected": [True, True, True, False],
+    ...         "alpha": [0.1, 0.1, 0.2, 0.2],
+    ...         "rmse": [1.0, 1.0, 2.0, 2.0],
+    ...     }
+    ... )
+    >>> summarize_folds(selection)  # doctest: +NORMALIZE_WHITESPACE
+          alpha  rmse  n_selected
+    fold
+    0       0.1   1.0           2
+    1       0.2   2.0           1
+    """
+    missing = {"fold", "selected", "alpha", "rmse"} - set(selection.columns)
+    if missing:
+        raise ValueError(f"Missing selection columns: {sorted(missing)}")
+    return selection.groupby("fold").agg(
+        alpha=("alpha", "first"),
+        rmse=("rmse", "first"),
+        n_selected=("selected", "sum"),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class SavedLassoResult:
+    """Saved result of a Lasso feature selection.
+
+    Parameters
+    ----------
+    target_name : Target
+        Target the RMSE was computed on.
+    config : LassoConfig
+        Configuration of the selection, read from its JSON dump.
+    result_path : pathlib.Path
+        CSV file of the per-fold selection.
+    dataset_key : str
+        Hash of the dataset the selection was run on (see ``Dataset.key``).
+    dataset_name : str or None, optional
+        Name of that dataset, if it had one. Default is None.
+    """
+
+    target_name: Target
+    config: LassoConfig
+    result_path: Path
+    dataset_key: str
+    dataset_name: str | None = None
+
+
+def list_saved_results(
+    dataset_key: str, models_dir: Path = MODELS_DIR
+) -> list[SavedLassoResult]:
+    """List the saved Lasso selections of one dataset.
+
+    A result is listed when its CSV file and its JSON metadata both exist
+    under ``<models_dir>/lasso/<dataset_key>/<target>/``. Metadata that
+    cannot be read are skipped and logged.
+
+    Parameters
+    ----------
+    dataset_key : str
+        Hash of the dataset (see ``Dataset.key``); only its results are
+        listed, since the regularisation path needs the very same data.
+    models_dir : pathlib.Path, optional
+        Root directory of the saved results. Default is ``MODELS_DIR``.
+
+    Returns
+    -------
+    list of SavedLassoResult
+        Saved results, sorted by target then configuration key; empty when
+        nothing is saved for this dataset.
+
+    See Also
+    --------
+    BaseModeling.save_result : Writes the CSV and JSON files.
+    """
+    saved = []
+    dataset_dir = models_dir / ModelingLasso.name / dataset_key
+    # loop over the saved files, not over the data
+    for metadata_path in sorted(dataset_dir.glob("*/*.json")):
+        result_path = metadata_path.with_suffix(".csv")
+        target_name = metadata_path.parent.name
+        if not result_path.exists() or target_name not in TARGETS:
+            logger.warning(
+                "Skipping %s: no CSV result or unknown target", metadata_path
+            )
+            continue
+        try:
+            metadata = json.loads(metadata_path.read_text())
+            config = LassoConfig.model_validate(metadata["config"])
+            dataset_name = metadata.get("dataset_name")
+        # TypeError / KeyError: valid JSON, but not the metadata of save_result
+        except (json.JSONDecodeError, KeyError, TypeError, ValidationError):
+            logger.exception("Skipping %s: invalid metadata", metadata_path)
+            continue
+        saved.append(
+            SavedLassoResult(
+                cast(Target, target_name),
+                config,
+                result_path,
+                dataset_key=dataset_key,
+                dataset_name=dataset_name,
+            )
+        )
+    return saved

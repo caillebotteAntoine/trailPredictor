@@ -1,5 +1,6 @@
 """Tests for :mod:`TrailPredictor.modeling.lasso`."""
 
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +21,7 @@ from TrailPredictor.modeling.lasso import (
     LassoPath,
     ModelingLasso,
     selection_frequency,
+    summarize_folds,
 )
 from TrailPredictor.modeling.models import Modeling
 
@@ -336,3 +338,109 @@ def test_selection_frequency_missing_column_raises() -> None:
 def test_selection_frequency_without_result_raises(model: ModelingLasso) -> None:
     with pytest.raises(ValueError, match="no result"):
         _ = model.selection_frequency
+
+
+# --- summarize_folds
+
+
+def test_summarize_folds_counts_selected_features() -> None:
+    selection = pd.DataFrame(
+        {
+            "fold": [0, 0, 0, 1, 1, 1],
+            "feature": ["a", "b", "c"] * 2,
+            "lasso_coef": [1.0, 0.0, 2.0, 1.0, 0.0, 0.0],
+            "selected": [True, False, True, True, False, False],
+            "alpha": [0.1] * 3 + [0.2] * 3,
+            "rmse": [1.5] * 3 + [2.5] * 3,
+        }
+    )
+
+    folds = summarize_folds(selection)
+
+    expected = pd.DataFrame(
+        {"alpha": [0.1, 0.2], "rmse": [1.5, 2.5], "n_selected": [2, 1]},
+        index=pd.Index([0, 1], name="fold"),
+    )
+    pd.testing.assert_frame_equal(folds, expected)
+
+
+def test_summarize_folds_empty_selection() -> None:
+    assert summarize_folds(pd.DataFrame(columns=SELECTION_COLUMNS)).empty
+
+
+def test_summarize_folds_missing_column() -> None:
+    with pytest.raises(ValueError, match="rmse"):
+        summarize_folds(pd.DataFrame(columns=["fold", "selected", "alpha"]))
+
+
+# --- list_saved_results
+
+
+@pytest.fixture
+def saved_model(lasso_data: pd.DataFrame, tmp_path: Path) -> ModelingLasso:
+    """Lasso model with a (fake) saved result, without running the selection."""
+    model = ModelingLasso(
+        Dataset(lasso_data, name="lasso_dataset"),
+        LassoConfig(n_splits=N_SPLITS, inner_n_splits=INNER_N_SPLITS),
+        models_dir=tmp_path,
+    )
+    model.result = pd.DataFrame(columns=SELECTION_COLUMNS)
+    model.save_result()
+    return model
+
+
+def test_list_saved_results_empty_dir(tmp_path: Path) -> None:
+    assert not lasso_module.list_saved_results("missing", tmp_path)
+
+
+def test_list_saved_results_finds_saved_model(
+    saved_model: ModelingLasso, tmp_path: Path
+) -> None:
+    dataset_key = saved_model.dataset.key
+
+    saved = lasso_module.list_saved_results(dataset_key, tmp_path)
+
+    assert saved == [
+        lasso_module.SavedLassoResult(
+            saved_model.dataset.target_name,
+            saved_model.config,
+            saved_model.result_path,
+            dataset_key=dataset_key,
+            dataset_name="lasso_dataset",
+        )
+    ]
+
+
+def test_list_saved_results_filters_by_dataset(
+    saved_model: ModelingLasso, tmp_path: Path
+) -> None:
+    other_dir = tmp_path / ModelingLasso.name / "other_key"
+    shutil.copytree(saved_model.result_path.parent.parent, other_dir)
+
+    saved = lasso_module.list_saved_results(saved_model.dataset.key, tmp_path)
+
+    assert [result.result_path for result in saved] == [saved_model.result_path]
+
+
+def test_list_saved_results_skips_invalid_files(
+    saved_model: ModelingLasso, tmp_path: Path
+) -> None:
+    target_dir = saved_model.result_path.parent
+    metadata = saved_model.result_path.with_suffix(".json").read_text()
+    invalid_files = {
+        "bad_config": '{"config": {"unknown_field": 1}}',
+        "not_json": "{",
+        "not_a_dict": "[]",
+    }
+    for stem, content in invalid_files.items():
+        (target_dir / f"{stem}.json").write_text(content)
+        (target_dir / f"{stem}.csv").write_text("fold\n0\n")
+    (target_dir / "no_csv.json").write_text(metadata)
+    unknown_target = target_dir.parent / "not_a_target"
+    unknown_target.mkdir()
+    (unknown_target / "key.json").write_text(metadata)
+    (unknown_target / "key.csv").write_text("fold\n0\n")
+
+    saved = lasso_module.list_saved_results(saved_model.dataset.key, tmp_path)
+
+    assert [result.result_path for result in saved] == [saved_model.result_path]
