@@ -18,7 +18,12 @@ def summary() -> pd.DataFrame:
         {
             "id": [11, 12, 13, 13],
             "type": ["run", "ride", "run", "run"],
-            "file_name": ["activities/11.fit.gz", "activities/12.fit", "a.fit", "b.fit"],
+            "file_name": [
+                "activities/11.fit.gz",
+                "activities/12.fit",
+                "a.fit",
+                "b.fit",
+            ],
         },
         index=[5, 6, 7, 8],
     )

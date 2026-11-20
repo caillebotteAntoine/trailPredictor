@@ -177,8 +177,12 @@ _PRESETS: Mapping[Preset, Callable[[pd.DataFrame], pd.Series]] = {
     Preset.TOP_5: lambda pool: _ranked(pool).head(5)["name"],
     Preset.TOP_10: lambda pool: _ranked(pool).head(10)["name"],
     Preset.TOP_20: lambda pool: _ranked(pool).head(20)["name"],
-    Preset.POSITIVE: lambda pool: _ranked(pool).loc[lambda d: d["spearman"] > 0, "name"],
-    Preset.NEGATIVE: lambda pool: _ranked(pool).loc[lambda d: d["spearman"] < 0, "name"],
+    Preset.POSITIVE: lambda pool: _ranked(pool).loc[
+        lambda d: d["spearman"] > 0, "name"
+    ],
+    Preset.NEGATIVE: lambda pool: _ranked(pool).loc[
+        lambda d: d["spearman"] < 0, "name"
+    ],
     Preset.ALL: lambda pool: pool["name"],
 }
 

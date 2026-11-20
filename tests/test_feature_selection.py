@@ -99,14 +99,32 @@ def test_apply_filters_defaults_keep_everything(correlations: pd.DataFrame) -> N
 @pytest.mark.parametrize(
     ("kwargs", "expected"),
     [
-        pytest.param({"search": "CLIMB"}, ["climb_back_1km", "Climb_front_1km"], id="search_ignores_case"),
+        pytest.param(
+            {"search": "CLIMB"},
+            ["climb_back_1km", "Climb_front_1km"],
+            id="search_ignores_case",
+        ),
         pytest.param({"search": "_["}, [], id="search_is_not_a_regex"),
-        pytest.param({"groups": ["past", "ratio"]}, ["climb_back_1km", "x_ratio"], id="groups"),
-        pytest.param({"min_abs": 0.3}, ["climb_back_1km", "Climb_front_1km", "drop_done"], id="min_abs_drops_nan"),
-        pytest.param({"max_missing": 10.0}, ["climb_back_1km", "drop_done", "x_ratio"], id="max_missing"),
-        pytest.param({"search": "climb", "min_abs": 0.7}, ["climb_back_1km"], id="combined"),
+        pytest.param(
+            {"groups": ["past", "ratio"]},
+            ["climb_back_1km", "x_ratio"],
+            id="groups",
+        ),
+        pytest.param(
+            {"min_abs": 0.3},
+            ["climb_back_1km", "Climb_front_1km", "drop_done"],
+            id="min_abs_drops_nan",
+        ),
+        pytest.param(
+            {"max_missing": 10.0},
+            ["climb_back_1km", "drop_done", "x_ratio"],
+            id="max_missing",
+        ),
+        pytest.param(
+            {"search": "climb", "min_abs": 0.7}, ["climb_back_1km"], id="combined"
+        ),
     ],
-)  # fmt: skip
+)
 def test_apply_filters(
     correlations: pd.DataFrame, kwargs: dict[str, object], expected: list[str]
 ) -> None:
@@ -134,7 +152,10 @@ def test_apply_filters_does_not_modify_input(correlations: pd.DataFrame) -> None
         (Preset.TOP_10, ["climb_back_1km", "Climb_front_1km", "drop_done", "x_ratio"]),
         (Preset.POSITIVE, ["climb_back_1km", "drop_done"]),
         (Preset.NEGATIVE, ["Climb_front_1km", "x_ratio"]),
-        (Preset.ALL, ["climb_back_1km", "Climb_front_1km", "drop_done", "x_ratio", "y"]),
+        (
+            Preset.ALL,
+            ["climb_back_1km", "Climb_front_1km", "drop_done", "x_ratio", "y"],
+        ),
     ],
 )
 def test_apply_preset(
