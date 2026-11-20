@@ -53,7 +53,7 @@ repos:
         entry: poetry run vulture
         language: system
         types: [python]
-        args: [TrailPredictor, pages, app.py, vulture_whitelist.py]
+        args: [TrailPredictor, pages, app.py, desktop.py, vulture_whitelist.py]
         pass_filenames: false   # analyse the whole project, not only staged files
         require_serial: true
 

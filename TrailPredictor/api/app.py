@@ -1,0 +1,196 @@
+"""FastAPI application serving the API and the HTML/JS front end."""
+
+import asyncio
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import TypeAdapter
+
+from TrailPredictor.api.jobs import JobManager, JobSnapshot, UnknownJobError
+
+logger = logging.getLogger(__name__)
+
+STATIC_DIR = Path(__file__).parent / "static"
+APP_TITLE = "Trail Predictor"
+# Longest wait between two server-sent events; a comment line keeps the
+# connection alive and lets the server notice a closed client.
+SSE_KEEPALIVE_S = 15.0
+SSE_MEDIA_TYPE = "text/event-stream"
+
+_SNAPSHOT_JSON = TypeAdapter(JobSnapshot)
+
+
+def _job_manager(request: Request) -> JobManager:
+    manager: JobManager = request.app.state.job_manager
+    return manager
+
+
+def _snapshot_or_404(manager: JobManager, job_id: str) -> JobSnapshot:
+    try:
+        return manager.snapshot(job_id)
+    except UnknownJobError:
+        raise HTTPException(status_code=404, detail="Unknown job") from None
+
+
+async def job_events(
+    manager: JobManager, job_id: str, keepalive_s: float = SSE_KEEPALIVE_S
+) -> AsyncIterator[str]:
+    """Yield the server-sent events of a job until it finishes.
+
+    Parameters
+    ----------
+    manager : JobManager
+        Manager running the job.
+    job_id : str
+        Identifier of the job.
+    keepalive_s : float, optional
+        Longest wait between two events, in seconds. Default is
+        ``SSE_KEEPALIVE_S``.
+
+    Yields
+    ------
+    str
+        ``data: <JobSnapshot JSON>`` event at every change of the job, the
+        last one with a finished status, or a ``: keepalive`` comment when
+        nothing changed for `keepalive_s` seconds.
+
+    Raises
+    ------
+    UnknownJobError
+        If `job_id` was never submitted.
+    """
+    version = -1  # unknown: the current state is sent at once
+    while True:
+        # the wait blocks a worker thread, not the event loop
+        snapshot = await asyncio.to_thread(
+            manager.wait_for_change, job_id, version, keepalive_s
+        )
+        if snapshot.version == version:
+            yield ": keepalive\n\n"
+            continue
+        version = snapshot.version
+        yield f"data: {_SNAPSHOT_JSON.dump_json(snapshot).decode()}\n\n"
+        if snapshot.finished:
+            return
+
+
+router = APIRouter(prefix="/api")
+
+
+@router.get("/health")
+def health() -> dict[str, str]:
+    """Report that the server is up.
+
+    Returns
+    -------
+    dict[str, str]
+        ``{"status": "ok"}``.
+    """
+    return {"status": "ok"}
+
+
+@router.get("/jobs/{job_id}")
+def job_status(job_id: str, request: Request) -> JobSnapshot:
+    """Return the current state of a job.
+
+    Parameters
+    ----------
+    job_id : str
+        Identifier of the job.
+    request : fastapi.Request
+        Incoming request, giving access to the job manager.
+
+    Returns
+    -------
+    JobSnapshot
+        Latest state of the job.
+
+    Raises
+    ------
+    fastapi.HTTPException
+        404 if the job is unknown.
+    """
+    return _snapshot_or_404(_job_manager(request), job_id)
+
+
+@router.get("/jobs/{job_id}/events")
+def job_event_stream(job_id: str, request: Request) -> StreamingResponse:
+    """Stream the progress of a job as server-sent events.
+
+    Parameters
+    ----------
+    job_id : str
+        Identifier of the job.
+    request : fastapi.Request
+        Incoming request, giving access to the job manager.
+
+    Returns
+    -------
+    fastapi.responses.StreamingResponse
+        ``text/event-stream`` response fed by `job_events`.
+
+    Raises
+    ------
+    fastapi.HTTPException
+        404 if the job is unknown.
+    """
+    manager = _job_manager(request)
+    _snapshot_or_404(manager, job_id)
+    return StreamingResponse(
+        job_events(manager, job_id),
+        media_type=SSE_MEDIA_TYPE,
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+def create_app(
+    job_manager: JobManager | None = None, static_dir: Path = STATIC_DIR
+) -> FastAPI:
+    """Build the application: the ``/api`` routes and the static front end.
+
+    Parameters
+    ----------
+    job_manager : JobManager or None, optional
+        Manager of the background jobs. Default is None: the application
+        creates its own and shuts it down when it stops.
+    static_dir : pathlib.Path, optional
+        Directory of the front end, whose ``index.html`` is served at ``/``.
+        Default is ``STATIC_DIR``.
+
+    Returns
+    -------
+    fastapi.FastAPI
+        The application, to be served by uvicorn.
+
+    Examples
+    --------
+    Development server with automatic reload::
+
+        poetry run uvicorn TrailPredictor.api:create_app --factory --reload
+    """
+    manager = JobManager() if job_manager is None else job_manager
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        """Shut the job manager down when the application stops.
+
+        Yields
+        ------
+        None
+            Control back to the server while it runs.
+        """
+        yield
+        if job_manager is None:  # owned by the application
+            manager.shutdown(wait=False)
+
+    app = FastAPI(title=APP_TITLE, lifespan=lifespan)
+    app.state.job_manager = manager
+    app.include_router(router)
+    # mounted last: the API routes take precedence over the static files
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+    return app
