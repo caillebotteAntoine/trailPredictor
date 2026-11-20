@@ -12,22 +12,32 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from collections.abc import Callable
 from typing import Any
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 
 from TrailPredictor.dataset import Dataset
+from TrailPredictor.feature_selection import (
+    CORRELATION_COLUMNS,
+    FeatureGroup,
+    Preset,
+    apply_filters,
+    apply_preset,
+    merge_edits,
+)
+from TrailPredictor.feature_selection import (
+    correlation_table as compute_correlation_table,
+)
 from TrailPredictor.modeling.heart_rate import (
     REFERENCE_CUTS,
     SavedHeartRateResult,
     cuts_to_zones,
     list_saved_results,
     parse_cuts,
+    saved_one_se_cuts,
 )
-from TrailPredictor.plot import PlotDataset, PlotHeartRate
+from TrailPredictor.plot import PlotDataset
 from TrailPredictor.speed_columns import TARGETS, Target
 
 logger = logging.getLogger(__name__)
@@ -59,14 +69,21 @@ FILTER_KEYS = {
     "dataset_filter_max_missing": 100,
 }
 
-# La corrélation de Spearman est calculée avec la cible choisie, puis son
-# signe est inversé pour les cibles de type allure (« pace ») afin de toujours
-# l'exprimer par rapport à la vitesse (+ : la feature va avec une allure plus
-# rapide).
-PACE_SIGN = -1.0
-SPEED_SIGN = 1.0
-
-TABLE_COLUMNS = ["Nom", "Spearman", "Manquantes (%)", "Groupe"]
+GROUP_LABELS = {
+    FeatureGroup.PAST: "Passé (back)",
+    FeatureGroup.UPCOMING: "À venir (front)",
+    FeatureGroup.CUMULATIVE: "Cumuls",
+    FeatureGroup.RATIO: "Ratios",
+    FeatureGroup.OTHER: "Autres",
+}
+PRESET_LABELS = {
+    Preset.TOP_5: "Top 5 (|ρ|)",
+    Preset.TOP_10: "Top 10 (|ρ|)",
+    Preset.TOP_20: "Top 20 (|ρ|)",
+    Preset.POSITIVE: "Corrélées positivement",
+    Preset.NEGATIVE: "Corrélées négativement",
+    Preset.ALL: "Toutes les features filtrées",
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -101,26 +118,11 @@ def load_dataset(min_distance: int, max_distance: int, segment_width: int) -> Da
     )
 
 
-def _feature_group(name: str) -> str:
-    if "_back_" in name:
-        return "Passé (back)"
-    if "_front_" in name:
-        return "À venir (front)"
-    if name.endswith("_done") or name.endswith("_remaining") or name.endswith("_total"):
-        return "Cumuls"
-    if name.endswith("_ratio"):
-        return "Ratios"
-    return "Autres"
-
-
 @st.cache_data
 def correlation_table(
     min_distance: int, max_distance: int, segment_width: int, target_name: Target
 ) -> pd.DataFrame:
-    """Compute the Spearman correlation of each numeric feature with the target.
-
-    The sign is flipped for pace-like targets, so a positive correlation always
-    means a faster running.
+    """Compute the Spearman correlation of each feature with the target (cached).
 
     Parameters
     ----------
@@ -136,118 +138,10 @@ def correlation_table(
     Returns
     -------
     pandas.DataFrame
-        Columns ``Nom``, ``Spearman``, ``Manquantes (%)`` and ``Groupe``,
-        sorted by decreasing absolute correlation (NaN last).
+        Table of `TrailPredictor.feature_selection.correlation_table`.
     """
     dataset = load_dataset(min_distance, max_distance, segment_width)
-    plot = dataset.with_target(target_name).plot
-
-    target = pd.to_numeric(plot.target, errors="coerce")
-    target = target.replace([np.inf, -np.inf], np.nan)
-
-    data = dataset.data
-    names = [
-        name for name in plot.features if pd.api.types.is_numeric_dtype(data[name])
-    ]
-    frame = (
-        data[names]
-        .apply(pd.to_numeric, errors="coerce")
-        .astype(float)
-        .replace([np.inf, -np.inf], np.nan)
-    )
-    frame["__target__"] = target
-    sign = PACE_SIGN if target_name.endswith("pace") else SPEED_SIGN
-    rho = frame.corr(method="spearman")["__target__"].drop("__target__") * sign
-
-    table = pd.DataFrame(
-        {
-            "Nom": rho.index,
-            "Spearman": rho.to_numpy(),
-            "Manquantes (%)": (data[names].isna().mean() * 100).round(2).to_numpy(),
-            "Groupe": [_feature_group(name) for name in rho.index],
-        }
-    )
-    order = table["Spearman"].abs().sort_values(ascending=False, na_position="last")
-    return table.loc[order.index].reset_index(drop=True)
-
-
-# --------------------------------------------------------------------------- #
-#                           FILTRES ET PRESETS (purs)
-# --------------------------------------------------------------------------- #
-def apply_filters(
-    correlations: pd.DataFrame,
-    search: str,
-    groups: list[str],
-    min_abs: float,
-    max_missing: float,
-) -> pd.DataFrame:
-    """Keep the features that pass every filter, in the same order.
-
-    Parameters
-    ----------
-    correlations : pandas.DataFrame
-        Table returned by `correlation_table`.
-    search : str
-        Case-insensitive substring of the feature name.
-    groups : list of str
-        Allowed feature groups; all groups when empty.
-    min_abs : float
-        Minimum absolute Spearman correlation; no filter when 0.
-    max_missing : float
-        Maximum percentage of missing values.
-
-    Returns
-    -------
-    pandas.DataFrame
-        Filtered table with a fresh index.
-    """
-    mask = correlations["Nom"].str.contains(search, case=False, na=False, regex=False)
-    if groups:
-        mask &= correlations["Groupe"].isin(groups)
-    mask &= correlations["Manquantes (%)"] <= max_missing
-    if min_abs > 0:
-        mask &= correlations["Spearman"].abs() >= min_abs
-    return correlations[mask].reset_index(drop=True)
-
-
-def _ranked(pool: pd.DataFrame) -> pd.DataFrame:
-    return pool.dropna(subset=["Spearman"])
-
-
-PRESETS: dict[str, Callable[[pd.DataFrame], list[str]]] = {
-    "Top 5 (|ρ|)": lambda pool: _ranked(pool).head(5)["Nom"].tolist(),
-    "Top 10 (|ρ|)": lambda pool: _ranked(pool).head(10)["Nom"].tolist(),
-    "Top 20 (|ρ|)": lambda pool: _ranked(pool).head(20)["Nom"].tolist(),
-    "Corrélées positivement": lambda pool: (
-        _ranked(pool).loc[lambda d: d["Spearman"] > 0, "Nom"].tolist()
-    ),
-    "Corrélées négativement": lambda pool: (
-        _ranked(pool).loc[lambda d: d["Spearman"] < 0, "Nom"].tolist()
-    ),
-    "Toutes les features filtrées": lambda pool: pool["Nom"].tolist(),
-}
-
-
-def merge_edits(current: list[str], flags: dict[str, bool]) -> list[str]:
-    """Apply the ticked boxes of the table to the selection.
-
-    Parameters
-    ----------
-    current : list of str
-        Currently selected features, in selection order.
-    flags : dict[str, bool]
-        Tick state of each feature shown in the table.
-
-    Returns
-    -------
-    list of str
-        Updated selection. Features missing from `flags` (hidden by a
-        filter) are unchanged, the order is kept and new features are
-        appended.
-    """
-    updated = [name for name in current if flags.get(name, True)]
-    updated += [name for name, on in flags.items() if on and name not in updated]
-    return updated
+    return compute_correlation_table(dataset.with_target(target_name))
 
 
 # --------------------------------------------------------------------------- #
@@ -271,7 +165,7 @@ def _table_key(pool: pd.DataFrame) -> str:
     It does NOT change when the user ticks a box, otherwise successive ticks
     would be lost.
     """
-    digest = hashlib.md5("|".join(pool["Nom"]).encode()).hexdigest()[:8]
+    digest = hashlib.md5("|".join(pool["name"]).encode()).hexdigest()[:8]
     return f"dataset_table_{st.session_state[REVISION_KEY]}_{digest}"
 
 
@@ -290,31 +184,33 @@ def selection_table(pool: pd.DataFrame, selected: list[str]) -> list[str]:
     list of str
         Selection after the user's ticks.
     """
-    frame = pool[TABLE_COLUMNS].copy()
-    frame.insert(0, "✓", frame["Nom"].isin(selected))
+    frame = pool[CORRELATION_COLUMNS].assign(
+        group=pool["group"].map(lambda group: GROUP_LABELS[FeatureGroup(group)])
+    )
+    frame.insert(0, "✓", frame["name"].isin(selected))
     edited = st.data_editor(
         frame,
         key=_table_key(pool),
         hide_index=True,
         height=min(38 + 35 * len(frame), 460),
-        disabled=TABLE_COLUMNS,
+        disabled=CORRELATION_COLUMNS,
         column_config={
             "✓": st.column_config.CheckboxColumn("✓", width="small"),
-            "Nom": st.column_config.TextColumn("Feature", width="medium"),
-            "Spearman": st.column_config.NumberColumn(
+            "name": st.column_config.TextColumn("Feature", width="medium"),
+            "spearman": st.column_config.NumberColumn(
                 "ρ",
                 format="%+.2f",
                 width="small",
                 help="Corrélation de Spearman avec la vitesse (+ : plus rapide).",
             ),
-            "Manquantes (%)": st.column_config.NumberColumn(
+            "missing_pct": st.column_config.NumberColumn(
                 "NaN %", format="%.1f", width="small"
             ),
-            "Groupe": st.column_config.TextColumn("Groupe", width="small"),
+            "group": st.column_config.TextColumn("Groupe", width="small"),
         },
         **STRETCH,
     )
-    flags = dict(zip(edited["Nom"], edited["✓"].astype(bool)))
+    flags = dict(zip(edited["name"], edited["✓"].astype(bool)))
     return merge_edits(selected, flags)
 
 
@@ -328,7 +224,7 @@ def render_selection_panel(plot: PlotDataset, correlations: pd.DataFrame) -> Non
     correlations : pandas.DataFrame
         Table returned by `correlation_table`.
     """
-    ranked = correlations["Nom"].tolist()  # numériques, triées par |rho|
+    ranked = correlations["name"].tolist()  # numériques, triées par |rho|
     if not ranked:
         st.warning("Aucune feature numérique disponible dans ce dataset.")
         return
@@ -349,7 +245,8 @@ def render_selection_panel(plot: PlotDataset, correlations: pd.DataFrame) -> Non
     st.text_input("Rechercher", key="dataset_filter_search")
     st.multiselect(
         "Groupes",
-        options=sorted(correlations["Groupe"].unique()),
+        options=sorted(correlations["group"].unique()),
+        format_func=lambda group: GROUP_LABELS[FeatureGroup(group)],
         key="dataset_filter_groups",
         placeholder="Tous les groupes",
     )
@@ -367,12 +264,14 @@ def render_selection_panel(plot: PlotDataset, correlations: pd.DataFrame) -> Non
     )
 
     # --- Presets (ils piochent dans les features filtrées) -----------------
-    preset = st.selectbox("Preset", list(PRESETS), key="dataset_preset")
+    preset = st.selectbox(
+        "Preset", list(Preset), format_func=PRESET_LABELS.get, key="dataset_preset"
+    )
     replace_col, add_col, clear_col = st.columns(3)
     if replace_col.button("Remplacer", key="dataset_preset_replace"):
-        _set_selection(PRESETS[preset](pool))
+        _set_selection(apply_preset(preset, pool))
     if add_col.button("Ajouter", key="dataset_preset_add"):
-        _set_selection(st.session_state[SELECTION_KEY] + PRESETS[preset](pool))
+        _set_selection(st.session_state[SELECTION_KEY] + apply_preset(preset, pool))
     if clear_col.button("Vider", key="dataset_preset_clear"):
         _set_selection([])
 
@@ -477,26 +376,18 @@ def saved_zone_options() -> dict[str, tuple[str, list[int]]]:
         CSV path of each saved optimisation mapped to its selector label and
         the cuts, in bpm, chosen by the one-standard-error rule.
     """
-    options: dict[str, tuple[str, list[int]]] = {}
-    # loop over the saved files, not over the data
-    for saved in list_saved_results():
-        try:
-            trials = pd.read_csv(saved.result_path)
-            cuts = PlotHeartRate(trials, saved.target_name).one_se_cuts
-        except (OSError, ValueError, pd.errors.ParserError):
-            logger.exception("Skipping the zones of %s", saved.result_path)
-            continue
-        options[str(saved.result_path)] = (_zones_label(saved, cuts), cuts)
-    return options
+    saved_results = {saved.result_path: saved for saved in list_saved_results()}
+    return {
+        str(path): (_zones_label(saved_results[path], cuts), cuts)
+        for path, cuts in saved_one_se_cuts(saved_results.values()).items()
+    }
 
 
 def _zones_label(saved: SavedHeartRateResult, cuts: list[int]) -> str:
-    dataset = (
-        saved.dataset_key
-        if saved.dataset_name is None
-        else f"{saved.dataset_name} ({saved.dataset_key})"
+    return (
+        f"N={len(cuts) + 1} · {saved.target_name} · {saved.dataset_label} · "
+        f"{saved.config.key}"
     )
-    return f"N={len(cuts) + 1} · {saved.target_name} · {dataset} · {saved.config.key}"
 
 
 def render_zones_sidebar() -> list[int]:

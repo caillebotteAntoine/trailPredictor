@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -23,13 +22,12 @@ import streamlit as st
 from pydantic import ValidationError
 
 from TrailPredictor.dataset import Dataset
+from TrailPredictor.modeling import heart_rate
 from TrailPredictor.modeling.heart_rate import (
     HR_CEIL_BPM,
     HR_FLOOR_BPM,
     MIN_ZONES,
-    REFERENCE_CUTS,
     HeartRateConfig,
-    ModelingHeartRate,
     SavedHeartRateResult,
     cuts_to_zones,
     list_saved_results,
@@ -74,20 +72,20 @@ def st_list_saved_results() -> list[SavedHeartRateResult]:
 
 
 @st.cache_data
-def load_trials(result_path: Path) -> pd.DataFrame:
+def load_trials(saved: SavedHeartRateResult) -> pd.DataFrame:
     """Read the trials of a saved optimisation (cached).
 
     Parameters
     ----------
-    result_path : pathlib.Path
-        CSV file of the trials.
+    saved : SavedHeartRateResult
+        Saved optimisation.
 
     Returns
     -------
     pandas.DataFrame
         One row per Optuna trial.
     """
-    return pd.read_csv(result_path)
+    return saved.load_trials()
 
 
 # The dataset is not hashed (slow): `dataset_params` identifies it in the cache.
@@ -125,8 +123,7 @@ def reference_score(
     """
     del dataset_params  # cache key only
     config = HeartRateConfig.model_validate_json(config_json)
-    model = ModelingHeartRate(dataset.with_target(target_name), config)
-    return model.evaluate_cuts_zones(REFERENCE_CUTS)
+    return heart_rate.reference_score(dataset, target_name, config)
 
 
 def run_optimization(
@@ -148,28 +145,23 @@ def run_optimization(
     SavedHeartRateResult
         Saved optimisation of `config`.
     """
-    model = ModelingHeartRate(dataset.with_target(target_name), config)
-    if model.result is not None:
+    progress_bar = st.progress(0.0, text="Démarrage...")
+
+    def update_progress(fraction: float, text: str) -> None:
+        progress_bar.progress(min(max(fraction, 0.0), 1.0), text=text)
+
+    try:
+        run = heart_rate.run_optimization(
+            dataset, target_name, config, progress_cb=update_progress
+        )
+    finally:
+        progress_bar.empty()
+    if run.reloaded:
         st.info("Résultat déjà sauvegardé pour cette configuration : rechargé.")
     else:
-        progress_bar = st.progress(0.0, text="Démarrage...")
-
-        def update_progress(fraction: float, text: str) -> None:
-            progress_bar.progress(min(max(fraction, 0.0), 1.0), text=text)
-
-        try:
-            model.optimize_zones(progress_cb=update_progress)
-        finally:
-            progress_bar.empty()
         st_list_saved_results.clear()
         st.success("Optimisation terminée et sauvegardée.")
-    return SavedHeartRateResult(
-        target_name,
-        config,
-        model.result_path,
-        dataset_key=model.dataset.key,
-        dataset_name=model.dataset.name,
-    )
+    return run.saved
 
 
 # --------------------------------------------------------------------------- #
@@ -192,15 +184,9 @@ def format_label(saved: SavedHeartRateResult) -> str:
     config = saved.config
     zone_counts = ", ".join(str(n) for n in config.zone_counts)
     return (
-        f"{_format_dataset(saved)} — {saved.target_name} — N={zone_counts} — "
+        f"{saved.dataset_label} — {saved.target_name} — N={zone_counts} — "
         f"{config.n_trials} essais — {config.key}"
     )
-
-
-def _format_dataset(saved: SavedHeartRateResult) -> str:
-    if saved.dataset_name is None:
-        return saved.dataset_key
-    return f"{saved.dataset_name} ({saved.dataset_key})"
 
 
 def render_dataset_info(params: tuple[int, int, int] | None, n_rows: int) -> None:
@@ -488,7 +474,7 @@ def render_results(
         Parameters identifying `dataset`.
     """
     try:
-        trials = load_trials(selected.result_path)
+        trials = load_trials(selected)
         reference = (
             None
             if dataset is None or dataset_params is None

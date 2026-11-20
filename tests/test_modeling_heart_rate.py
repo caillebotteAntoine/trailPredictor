@@ -17,9 +17,13 @@ from TrailPredictor.modeling.heart_rate import (
     HeartRateConfig,
     ModelingHeartRate,
     OneSeSelection,
+    SavedHeartRateResult,
     cuts_to_zones,
     list_saved_results,
     parse_cuts,
+    reference_score,
+    run_optimization,
+    saved_one_se_cuts,
     select_n_zones_one_se,
     suggest_cuts,
     summarize_zone_counts,
@@ -421,3 +425,139 @@ def test_select_n_zones_one_se(
 def test_select_n_zones_one_se_without_rmse_raises(rmse: list[float]) -> None:
     with pytest.raises(ValueError, match="finite RMSE"):
         select_n_zones_one_se(_summary(rmse, [np.nan] * len(rmse)))
+
+
+# --- SavedHeartRateResult
+
+
+@pytest.mark.parametrize(
+    ("dataset_name", "expected"),
+    [(None, "abc123"), (DATASET_NAME, f"{DATASET_NAME} (abc123)")],
+)
+def test_saved_result_dataset_label(
+    config: HeartRateConfig, tmp_path: Path, dataset_name: str | None, expected: str
+) -> None:
+    saved = SavedHeartRateResult(
+        "pace", config, tmp_path / "x.csv", "abc123", dataset_name
+    )
+
+    assert saved.dataset_label == expected
+
+
+def test_saved_result_load_trials(model: ModelingHeartRate) -> None:
+    model.optimize_zones()
+    saved = list_saved_results(model.models_dir)[0]
+
+    trials = saved.load_trials()
+
+    assert model.result is not None
+    assert len(trials) == len(model.result)
+    assert trials["n_zones"].tolist() == model.result["n_zones"].tolist()
+
+
+def test_saved_result_load_trials_missing_file_raises(
+    config: HeartRateConfig, tmp_path: Path
+) -> None:
+    saved = SavedHeartRateResult("pace", config, tmp_path / "missing.csv", "key")
+
+    with pytest.raises(OSError):
+        saved.load_trials()
+
+
+# --- run_optimization
+
+
+def test_run_optimization_computes_then_reloads(
+    dataset: pd.DataFrame, config: HeartRateConfig, tmp_path: Path
+) -> None:
+    reports: list[float] = []
+
+    first = run_optimization(
+        Dataset(dataset),
+        "speed",
+        config,
+        progress_cb=lambda fraction, _text: reports.append(fraction),
+        models_dir=tmp_path,
+    )
+    reports_after_first = len(reports)
+    second = run_optimization(
+        Dataset(dataset),
+        "speed",
+        config,
+        progress_cb=lambda fraction, _text: reports.append(fraction),
+        models_dir=tmp_path,
+    )
+
+    assert not first.reloaded
+    assert second.reloaded
+    assert reports_after_first > 0
+    assert len(reports) == reports_after_first  # no progress when reloaded
+    assert first.saved == second.saved
+    assert first.saved.target_name == "speed"
+    assert first.saved.result_path.exists()
+    assert list_saved_results(tmp_path) == [first.saved]
+
+
+def test_run_optimization_does_not_modify_dataset(
+    dataset: pd.DataFrame, config: HeartRateConfig, tmp_path: Path
+) -> None:
+    data = Dataset(dataset)
+    before = data.data.copy()
+
+    run_optimization(data, "speed", config, models_dir=tmp_path)
+
+    pd.testing.assert_frame_equal(data.data, before)
+
+
+# --- reference_score
+
+
+def test_reference_score_evaluates_reference_cuts(
+    dataset: pd.DataFrame, config: HeartRateConfig, tmp_path: Path
+) -> None:
+    model = ModelingHeartRate(
+        Dataset(dataset).with_target("speed"), config, models_dir=tmp_path
+    )
+
+    score = reference_score(Dataset(dataset), "speed", config)
+
+    assert score == pytest.approx(model.evaluate_cuts_zones(REFERENCE_CUTS))
+
+
+# --- saved_one_se_cuts
+
+
+def test_saved_one_se_cuts(model: ModelingHeartRate) -> None:
+    model.optimize_zones()
+    saved = list_saved_results(model.models_dir)
+
+    cuts = saved_one_se_cuts(saved)
+
+    assert list(cuts) == [model.result_path]
+    assert cuts[model.result_path] == model.plot.one_se_cuts
+
+
+def test_saved_one_se_cuts_skips_unreadable_results(
+    config: HeartRateConfig, tmp_path: Path
+) -> None:
+    no_completed_trial = tmp_path / "pruned.csv"
+    pd.DataFrame(
+        {
+            "n_zones": [2],
+            "trial_number": [0],
+            "rmse": [np.nan],
+            "rmse_se": [np.nan],
+            "cuts": ["[150]"],
+            "state": ["PRUNED"],
+        }
+    ).to_csv(no_completed_trial, index=False)
+    unreadable = [
+        SavedHeartRateResult("pace", config, tmp_path / "missing.csv", "key"),
+        SavedHeartRateResult("pace", config, no_completed_trial, "key"),
+    ]
+
+    assert not saved_one_se_cuts(unreadable)
+
+
+def test_saved_one_se_cuts_empty() -> None:
+    assert not saved_one_se_cuts([])

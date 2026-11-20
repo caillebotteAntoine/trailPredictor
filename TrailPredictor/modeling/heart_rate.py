@@ -3,7 +3,7 @@
 import json
 import logging
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from functools import partial
 from itertools import pairwise
@@ -442,6 +442,161 @@ class SavedHeartRateResult:
     result_path: Path
     dataset_key: str
     dataset_name: str | None = None
+
+    @property
+    def dataset_label(self) -> str:
+        """Return the dataset as ``"<name> (<key>)"``, or its key alone if unnamed.
+
+        Returns
+        -------
+        str
+            Label of the dataset the optimisation was run on.
+        """
+        if self.dataset_name is None:
+            return self.dataset_key
+        return f"{self.dataset_name} ({self.dataset_key})"
+
+    def load_trials(self) -> pd.DataFrame:
+        """Read the trials of the optimisation.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per Optuna trial, as saved by
+            `ModelingHeartRate.optimize_zones` (``cuts`` read as strings).
+
+        Raises
+        ------
+        OSError
+            If ``result_path`` cannot be read.
+        pandas.errors.ParserError
+            If ``result_path`` is not a valid CSV file.
+        """
+        return pd.read_csv(self.result_path)
+
+
+class OptimizationRun(NamedTuple):
+    """Outcome of `run_optimization`.
+
+    Attributes
+    ----------
+    saved : SavedHeartRateResult
+        Saved optimisation of the configuration.
+    reloaded : bool
+        True if the result was already saved and was reloaded instead of
+        being computed again.
+    """
+
+    saved: SavedHeartRateResult
+    reloaded: bool
+
+
+def run_optimization(
+    dataset: Dataset,
+    target_name: Target,
+    config: HeartRateConfig,
+    progress_cb: ProgressCallback | None = None,
+    models_dir: Path = MODELS_DIR,
+) -> OptimizationRun:
+    """Run and save the zone optimisation, unless it is already saved.
+
+    Parameters
+    ----------
+    dataset : Dataset
+        Dataset to optimise the zones on. It is not modified.
+    target_name : Target
+        Target the RMSE is computed on.
+    config : HeartRateConfig
+        Search space and budget.
+    progress_cb : ProgressCallback or None, optional
+        Progress reporter of `ModelingHeartRate.optimize_zones`; not called
+        when the result is reloaded. Default is None.
+    models_dir : pathlib.Path, optional
+        Root directory of the saved results. Default is ``MODELS_DIR``.
+
+    Returns
+    -------
+    OptimizationRun
+        Saved optimisation and whether it was reloaded.
+    """
+    model = ModelingHeartRate(dataset.with_target(target_name), config, models_dir)
+    reloaded = model.result is not None
+    if not reloaded:
+        model.optimize_zones(progress_cb=progress_cb)
+    saved = SavedHeartRateResult(
+        target_name,
+        config,
+        model.result_path,
+        dataset_key=model.dataset.key,
+        dataset_name=model.dataset.name,
+    )
+    return OptimizationRun(saved, reloaded)
+
+
+def reference_score(
+    dataset: Dataset, target_name: Target, config: HeartRateConfig
+) -> tuple[float, float]:
+    """Cross-validate the ``REFERENCE_CUTS`` zones.
+
+    Parameters
+    ----------
+    dataset : Dataset
+        Dataset to evaluate the zones on. It is not modified.
+    target_name : Target
+        Target the RMSE is computed on.
+    config : HeartRateConfig
+        Configuration giving the cross-validation folds and seed.
+
+    Returns
+    -------
+    rmse : float
+        Mean RMSE of the reference zones over the folds.
+    rmse_se : float
+        Standard error of the mean RMSE.
+    """
+    model = ModelingHeartRate(dataset.with_target(target_name), config)
+    return model.evaluate_cuts_zones(REFERENCE_CUTS)
+
+
+def saved_one_se_cuts(
+    saved_results: Iterable[SavedHeartRateResult],
+) -> dict[Path, list[int]]:
+    """Return the zones chosen by the one-standard-error rule of each result.
+
+    Results whose trials cannot be read, or hold no completed trial with a
+    finite RMSE, are skipped and logged.
+
+    Parameters
+    ----------
+    saved_results : iterable of SavedHeartRateResult
+        Saved optimisations, e.g. from `list_saved_results`.
+
+    Returns
+    -------
+    dict[pathlib.Path, list of int]
+        ``result_path`` of each readable optimisation mapped to its cuts, in
+        bpm, in the order of `saved_results`.
+
+    See Also
+    --------
+    TrailPredictor.plot.PlotHeartRate.one_se_cuts : Cuts of one optimisation.
+    """
+    # Lazy import: TrailPredictor.plot.heart_rate imports this module.
+    from TrailPredictor.plot.heart_rate import (  # pylint: disable=import-outside-toplevel
+        PlotHeartRate,
+    )
+
+    cuts: dict[Path, list[int]] = {}
+    # loop over the saved files, not over the data
+    for saved in saved_results:
+        try:
+            trials = saved.load_trials()
+            cuts[saved.result_path] = PlotHeartRate(
+                trials, saved.target_name
+            ).one_se_cuts
+        except (OSError, ValueError, pd.errors.ParserError):
+            logger.exception("Skipping the zones of %s", saved.result_path)
+    return cuts
 
 
 def list_saved_results(models_dir: Path = MODELS_DIR) -> list[SavedHeartRateResult]:
