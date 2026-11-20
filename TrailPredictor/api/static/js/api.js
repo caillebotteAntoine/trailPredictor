@@ -3,6 +3,24 @@
 const FINISHED_STATUSES = new Set(["succeeded", "failed"]);
 
 /**
+ * Read the error message of a failed API response.
+ * @param {Response} response - Response with a non-2xx status.
+ * @returns {Promise<string>} The "detail" of FastAPI: its message, or the
+ *   field and message of each validation error.
+ */
+async function errorDetail(response) {
+  const body = await response.json().catch(() => null);
+  const detail = body?.detail;
+  if (typeof detail === "string") {
+    return detail;
+  }
+  if (Array.isArray(detail)) {
+    return detail.map((error) => `${error.loc?.at(-1) ?? ""} : ${error.msg}`).join(" ; ");
+  }
+  return response.statusText;
+}
+
+/**
  * Fetch a JSON resource of the API.
  * @param {string} url - Path of the resource, e.g. "/api/health".
  * @param {RequestInit} [options] - Options passed to fetch.
@@ -15,10 +33,7 @@ export async function fetchJson(url, options = {}) {
     ...options,
   });
   if (!response.ok) {
-    // FastAPI errors carry a "detail": a message, or the validation errors
-    const body = await response.json().catch(() => null);
-    const detail = typeof body?.detail === "string" ? body.detail : response.statusText;
-    throw new Error(`${detail} (${response.status})`);
+    throw new Error(`${await errorDetail(response)} (${response.status})`);
   }
   return response.json();
 }

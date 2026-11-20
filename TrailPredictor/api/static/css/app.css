@@ -442,3 +442,38 @@ details summary {
     grid-template-columns: 1fr;
   }
 }
+
+/* --- Heart-rate zones page */
+
+.alert.success {
+  border-color: var(--ok);
+}
+
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.metric-delta {
+  font-size: 0.8rem;
+}
+
+.metric-delta.better {
+  color: var(--ok);
+}
+
+.metric-delta.worse {
+  color: var(--error);
+}
+
+pre.config {
+  max-height: 300px;
+  overflow: auto;
+  font-size: 0.8rem;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

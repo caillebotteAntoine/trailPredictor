@@ -1,10 +1,10 @@
 // Alpine component of the dataset page.
 
 import { fetchJson, watchJob } from "./api.js";
-import { PLOTLY_CONFIG, errorMessage, loadSetting, nextFrame, saveSetting } from "./ui.js";
+import {
+  PLOTLY_CONFIG, ZONES_CHOICE_SETTING, errorMessage, loadSetting, nextFrame, saveSetting,
+} from "./ui.js";
 
-// Shared with the heart-rate zones page: key of the saved zones of the dataset.
-export const ZONES_CHOICE_SETTING = "trailPredictor.heartRateZonesChoice";
 const REFERENCE_CUTS = "142, 161, 170, 183";
 const TARGETS = [
   "pace", "log_pace", "speed", "log_speed",

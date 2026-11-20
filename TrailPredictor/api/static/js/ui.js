@@ -2,6 +2,10 @@
 
 export const PLOTLY_CONFIG = { responsive: true, displaylogo: false };
 
+// Key of the saved optimisation whose zones the dataset page uses: set by the
+// heart-rate zones page, read by the dataset page.
+export const ZONES_CHOICE_SETTING = "trailPredictor.heartRateZonesChoice";
+
 /**
  * Return the message of an error, for the user.
  * @param {unknown} error - Caught error.

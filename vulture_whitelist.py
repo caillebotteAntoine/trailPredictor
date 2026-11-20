@@ -11,10 +11,17 @@ notebooks stop using it.
 import plotly.graph_objects as go
 import uvicorn
 
-from TrailPredictor.api import activity_routes, dataset_routes
+from TrailPredictor.api import activity_routes, dataset_routes, heart_rate_routes
 from TrailPredictor.api import app as api_app
 from TrailPredictor.api.activity_service import ActivitySummary, TrackView
 from TrailPredictor.api.dataset_service import FeatureRow, SavedZones
+from TrailPredictor.api.heart_rate_service import (
+    FormLimits,
+    OptimizationStarted,
+    PageContext,
+    ResultView,
+    SummaryRow,
+)
 from TrailPredictor.dataset import Dataset
 from TrailPredictor.modeling import candidates
 from TrailPredictor.modeling.config import ModelConfig
@@ -71,11 +78,27 @@ dataset_routes.parsed_cuts
 dataset_routes.dataset_saved_zones
 dataset_routes.current_dataset
 dataset_routes.select_dataset
+heart_rate_routes.page_context
+heart_rate_routes.saved_optimizations
+heart_rate_routes.optimization_result
+heart_rate_routes.optimization_trials_chart
 # Fields of API responses, serialized to JSON by FastAPI.
 ActivitySummary.id
 TrackView.tooltip
 FeatureRow.spearman
 FeatureRow.missing_pct
 SavedZones.config_key
+FormLimits.min_zones
+FormLimits.max_zones
+FormLimits.hr_floor_bpm
+FormLimits.hr_ceil_bpm
+PageContext.defaults
+PageContext.limits
+OptimizationStarted.already_saved
+SummaryRow.trial_number
+SummaryRow.n_complete
+SummaryRow.n_pruned
+SummaryRow.delta_vs_reference
+ResultView.best_zones_chart
 # Read by the uvicorn server loop, set in BackgroundServer.stop.
 uvicorn.Server.should_exit  # pylint: disable=no-member  # instance attribute

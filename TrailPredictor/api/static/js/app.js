@@ -21,7 +21,8 @@ const PAGES = [
     id: "heart-rate",
     title: "Zones cardiaques",
     description: "Optimisation et comparaison des zones de fréquence cardiaque.",
-    ready: false,
+    href: "heart_rate.html",
+    ready: true,
   },
 ];
 

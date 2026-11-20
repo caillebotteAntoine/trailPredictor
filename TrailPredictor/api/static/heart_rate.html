@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zones cardiaques — Trail Predictor</title>
+  <link rel="stylesheet" href="css/app.css">
+  <script src="lib/plotly.min.js"></script>
+  <!-- modules run before Alpine (deferred scripts keep the document order) -->
+  <script type="module" src="js/heart_rate.js"></script>
+  <script defer src="vendor/alpine-3.14.9.min.js"></script>
+</head>
+<body x-data="heartRatePage">
+  <header class="topbar">
+    <h1><a href="index.html">Trail Predictor</a> · Zones cardiaques</h1>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <h2>Dataset</h2>
+      <template x-if="dataset">
+        <small x-text="datasetCaption"></small>
+      </template>
+      <p class="alert warning" x-show="contextLoaded && !dataset">
+        Aucun dataset chargé : ouvrez la page
+        <a href="dataset.html">« Dataset / Features »</a> pour lancer une
+        optimisation ou calculer la référence.
+      </p>
+
+      <fieldset>
+        <legend>Mode</legend>
+        <label><input type="radio" value="load" x-model="mode"> Charger un modèle sauvegardé</label>
+        <label><input type="radio" value="optimize" x-model="mode"> Nouvelle optimisation</label>
+      </fieldset>
+
+      <!-- Saved results -->
+      <template x-if="mode === 'load'">
+        <div class="panel">
+          <p class="alert" x-show="!saved.length">Aucun modèle sauvegardé : lancez une optimisation.</p>
+          <label class="field" x-show="saved.length">Modèle sauvegardé
+            <select x-model="selectedKey" @change="showResult()">
+              <template x-for="result in saved" :key="result.key">
+                <option :value="result.key" x-text="resultLabel(result)" :selected="result.key === selectedKey"></option>
+              </template>
+            </select>
+          </label>
+          <details x-show="selectedSaved">
+            <summary>Configuration</summary>
+            <pre class="config" x-text="JSON.stringify(selectedSaved?.config, null, 2)"></pre>
+          </details>
+        </div>
+      </template>
+
+      <!-- New optimisation -->
+      <template x-if="mode === 'optimize' && form">
+        <form class="panel" @submit.prevent="optimize()">
+          <label class="field">Cible
+            <select x-model="form.target">
+              <template x-for="name in targets" :key="name">
+                <option :value="name" x-text="name" :selected="name === form.target"></option>
+              </template>
+            </select>
+          </label>
+          <fieldset class="groups">
+            <legend>Nombres de zones N</legend>
+            <template x-for="n in zoneCountChoices" :key="n">
+              <label><input type="checkbox" :value="n" x-model.number="form.zone_counts"> <span x-text="n"></span></label>
+            </template>
+          </fieldset>
+          <div class="row">
+            <label class="field">Premier seuil min (bpm)
+              <input type="number" :min="limits.hr_floor_bpm + 1" :max="limits.hr_ceil_bpm - 1" x-model.number="form.first_cut_range[0]">
+            </label>
+            <label class="field">max
+              <input type="number" :min="limits.hr_floor_bpm + 1" :max="limits.hr_ceil_bpm - 1" x-model.number="form.first_cut_range[1]">
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">Écart entre seuils min (bpm)
+              <input type="number" min="1" max="100" x-model.number="form.gap_range[0]">
+            </label>
+            <label class="field">max
+              <input type="number" min="1" max="100" x-model.number="form.gap_range[1]">
+            </label>
+          </div>
+          <label class="field">Dernier seuil maximal (bpm)
+            <input type="number" :min="limits.hr_floor_bpm + 1" :max="limits.hr_ceil_bpm - 1" x-model.number="form.max_last_cut">
+          </label>
+          <label class="field">Essais complétés par N
+            <input type="number" min="1" x-model.number="form.n_trials">
+          </label>
+          <label class="field">Facteur max d'essais (élagués inclus)
+            <input type="number" min="1" x-model.number="form.max_trials_factor">
+          </label>
+          <label class="field">Plis GroupKFold
+            <input type="number" min="2" x-model.number="form.n_splits">
+          </label>
+          <label class="field">Graine
+            <input type="number" step="1" x-model.number="form.seed">
+          </label>
+          <button type="submit" :disabled="!dataset || running">Lancer l'optimisation</button>
+        </form>
+      </template>
+    </aside>
+
+    <main class="content">
+      <h2>Zones cardiaques</h2>
+
+      <p class="alert error" x-show="error" x-text="error"></p>
+      <p class="alert" x-show="notice" x-text="notice"></p>
+
+      <div class="progress" x-show="progress !== null">
+        <div class="progress-bar" :style="`width: ${Math.round((progress ?? 0) * 100)}%`"></div>
+        <span x-text="progressMessage"></span>
+      </div>
+
+      <p class="alert" x-show="!result && !loadingResult && progress === null">
+        Choisissez un modèle sauvegardé ou lancez une optimisation depuis la barre latérale.
+      </p>
+      <p class="loading" x-show="loadingResult" x-text="dataset ? 'Chargement du modèle et calcul du RMSE de référence…' : 'Chargement du modèle…'"></p>
+
+      <template x-if="result">
+        <section class="results">
+          <small x-text="`Modèle : ${resultLabel(result.saved)}`"></small>
+          <p class="alert warning" x-show="!result.has_completed_trials">Ce modèle ne contient aucun essai complété.</p>
+
+          <template x-if="result.has_completed_trials">
+            <div class="results">
+              <section class="metrics">
+                <template x-for="metric in metricCards" :key="metric.label">
+                  <div class="metric">
+                    <span class="metric-label" x-text="metric.label"></span>
+                    <span class="metric-value" x-text="metric.value"></span>
+                    <span class="metric-delta" x-show="metric.delta" :class="metric.deltaClass" x-text="metric.delta"></span>
+                  </div>
+                </template>
+              </section>
+              <p><strong>Zones retenues :</strong> <span x-text="zonesText"></span></p>
+
+              <div class="table-wrap">
+                <table class="features summary">
+                  <thead>
+                    <tr>
+                      <th>N</th><th>Essai</th><th>Seuils (bpm)</th><th>RMSE ± SE</th>
+                      <th>Complétés</th><th>Élagués</th>
+                      <th x-show="result.reference">Δ référence</th>
+                      <th>Retenu (1-SE)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="row in result.summary" :key="row.n_zones">
+                      <tr :class="{ selected: row.chosen }">
+                        <td class="number" x-text="row.n_zones"></td>
+                        <td class="number" x-text="row.trial_number"></td>
+                        <td x-text="row.cuts.join(', ')"></td>
+                        <td class="number" x-text="formatRmse(row.rmse, row.rmse_se)"></td>
+                        <td class="number" x-text="row.n_complete"></td>
+                        <td class="number" x-text="row.n_pruned"></td>
+                        <td class="number" x-show="result.reference" x-text="signed(row.delta_vs_reference)"></td>
+                        <td x-text="row.chosen ? '✓' : ''"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="row">
+                <button type="button" @click="useZones()">Ajouter ces zones dans le dataset</button>
+              </div>
+              <p class="alert success" x-show="zonesChoice === result.saved.key"
+                 x-text="`Zones utilisées par le dataset de la page « Dataset / Features » : ${result.cuts.join(', ')} bpm.`"></p>
+
+              <div class="chart">
+                <p class="alert warning" x-show="result.best_zones_chart?.error"
+                   x-text="`Meilleur essai par N : ${result.best_zones_chart?.error}`"></p>
+                <div class="chart-plot" id="chart-best-zones"></div>
+              </div>
+
+              <fieldset>
+                <legend>Nombre de zones N</legend>
+                <template x-for="n in result.zone_counts" :key="n">
+                  <label><input type="radio" :value="n" x-model.number="trialsN" @change="renderTrialsChart()"> <span x-text="n"></span></label>
+                </template>
+              </fieldset>
+              <div class="chart">
+                <p class="alert warning" x-show="trialsError" x-text="`Essais pour N=${trialsN} : ${trialsError}`"></p>
+                <div class="chart-plot" id="chart-trials"></div>
+              </div>
+            </div>
+          </template>
+        </section>
+      </template>
+    </main>
+  </div>
+</body>
+</html>
