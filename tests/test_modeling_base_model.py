@@ -166,3 +166,11 @@ def test_cross_validate_does_not_modify_dataset(model: LinearModeling) -> None:
     model.cross_validate()
 
     pd.testing.assert_frame_equal(model.dataset.data, before)
+
+
+def test_fit_fits_pipeline_on_whole_dataset(model: LinearModeling) -> None:
+    pipeline = model.fit()
+
+    predicted = pipeline.predict(model.dataset.predictors)
+    assert predicted.shape == (len(model.dataset.data),)
+    assert np.isfinite(predicted).all()

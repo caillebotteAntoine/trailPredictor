@@ -16,6 +16,7 @@ from TrailPredictor.modeling import candidates
 from TrailPredictor.modeling.config import ModelConfig
 from TrailPredictor.modeling.heart_rate import HeartRateConfig, ModelingHeartRate
 from TrailPredictor.modeling.lasso import ModelingLasso
+from TrailPredictor.modeling.prediction import predict_activity
 from TrailPredictor.plot import (
     PlotActivities,
     PlotDataset,
@@ -48,6 +49,7 @@ PlotLasso.regularization_path
 
 # --- Prediction of a planned race from its GPX route
 RunningActivities.from_gpx_file
+predict_activity
 
 # --- False positives
 # Attribute of a plotly trace, set in PlotDataset.merge_figure.

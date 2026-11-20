@@ -185,6 +185,7 @@ class ModelingLasso(BaseModeling[LassoConfig]):
     """
 
     name: ClassVar[str] = "lasso"
+    fit_uses_groups: ClassVar[bool] = True  # inner folds of LassoCV
 
     def __init__(
         self,

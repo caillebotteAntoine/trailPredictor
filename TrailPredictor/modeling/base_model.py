@@ -49,6 +49,8 @@ class BaseModeling[ConfigT: ModelConfig](ABC):
     """
 
     name: ClassVar[str]
+    # whether a pipeline step consumes the activity ids (``groups``) when fitted
+    fit_uses_groups: ClassVar[bool] = False
 
     def __init__(
         self, dataset: Dataset, config: ConfigT, models_dir: Path = MODELS_DIR
@@ -189,6 +191,38 @@ class BaseModeling[ConfigT: ModelConfig](ABC):
                 ("regression", self.make_estimator()),
             ]
         )
+
+    def fit(self, dataset: Dataset | None = None) -> Pipeline:
+        """Fit the pipeline on a whole dataset, with groups routed by activity.
+
+        When ``fit_uses_groups`` is True, the activity ids are routed as
+        ``groups`` to the steps requesting them, e.g. a ``LassoCV`` whose folds
+        must be grouped by activity.
+
+        Parameters
+        ----------
+        dataset : Dataset or None, optional
+            Dataset to fit on. Default is None, meaning the dataset of the
+            model.
+
+        Returns
+        -------
+        sklearn.pipeline.Pipeline
+            Pipeline fitted on every segment of `dataset`.
+
+        See Also
+        --------
+        cross_validate : Same routing of the activity ids, on folds.
+        """
+        dataset = self._dataset if dataset is None else dataset
+        pipeline = self.build_pipeline(dataset)
+        with config_context(enable_metadata_routing=True):
+            # sklearn rejects a parameter that no step consumes
+            params = (
+                {"groups": dataset.data[GROUP_COLUMN]} if self.fit_uses_groups else {}
+            )
+            pipeline.fit(dataset.predictors, dataset.target, **params)
+        return pipeline
 
     def cross_validate(
         self, dataset: Dataset | None = None, *, return_estimator: bool = False
