@@ -1,5 +1,6 @@
 """Construction of the raw dataset and of the segment features."""
 
+import logging
 from typing import Literal
 
 import numpy as np
@@ -11,6 +12,8 @@ from TrailPredictor.activities import RunningActivities
 from TrailPredictor.load_fit import ProgressCallback
 from TrailPredictor.loading import load_activities
 from TrailPredictor.minetti import cost_of_running, cost_of_walking
+
+logger = logging.getLogger(__name__)
 
 WINDOWS_KM = (1, 3, 5, 10)
 FEATURES_SUFFIXES = ("done", "remaining")
@@ -89,14 +92,12 @@ def export_activities(
                 position / len(act), f"{row['distance_km']:.2f} km - {row['name']}"
             )
         else:
-            print(f"{row['distance_km']:.2f} km - {row['name']}")
+            logger.info("Loading %.2f km - %s", row["distance_km"], row["name"])
 
         file_path = row["file_name"]
 
         if not file_path.endswith(".fit.gz") and not file_path.endswith(".fit"):
-            print(
-                f"⏩Skipping {file_path} ({row['name']}) because it is not a FIT file"
-            )
+            logger.info("Skipping %s (%s): not a FIT file", file_path, row["name"])
             continue
 
         run = RunningActivities.from_computed_file(

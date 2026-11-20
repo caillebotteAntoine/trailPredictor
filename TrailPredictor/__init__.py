@@ -3,6 +3,8 @@
 # The package keeps its historical PascalCase name used by every import.
 # pylint: disable=invalid-name
 
+import logging
+
 from TrailPredictor.activities import RunningActivities
 from TrailPredictor.minetti import cost_of_running, cost_of_walking
 from TrailPredictor.utils import COMPUTED_DIR, DATA_DIR
@@ -15,9 +17,11 @@ __all__ = [
     "cost_of_walking",
 ]
 
+logger = logging.getLogger(__name__)
+
 DELETE_COMPUTED = False
 
 if DELETE_COMPUTED:
     for file in COMPUTED_DIR.glob("**/*.csv"):
-        print(f"Deleting {file}")
+        logger.info("Deleting %s", file)
         file.unlink()

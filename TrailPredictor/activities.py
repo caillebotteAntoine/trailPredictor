@@ -1,5 +1,6 @@
 """Single running activity aggregated into fixed-width distance segments."""
 
+import logging
 from pathlib import Path
 from warnings import warn
 
@@ -8,6 +9,8 @@ import pandas as pd
 from TrailPredictor.load_fit import ProgressCallback, load_fit_file
 from TrailPredictor.speed_columns import add_speed_columns
 from TrailPredictor.utils import COMPUTED_DIR, DATA_DIR
+
+logger = logging.getLogger(__name__)
 
 
 def _get_computed_file_path(file_path: str, segment_width: int) -> Path:
@@ -337,8 +340,8 @@ class RunningActivities:
         # try to load from the computed folder first
         path = _get_computed_file_path(file_path, segment_width=segment_width)
         if not path.exists():
-            print(
-                f"\t💾Computed file not found:\n\t{path},\n\t⌛trying to load from original file..."
+            logger.info(
+                "Computed file not found: %s, loading the original file instead", path
             )
             return cls.from_fit_file(
                 file_path, segment_width=segment_width, progress_cb=progress_cb

@@ -1,6 +1,7 @@
 """Dataset of segmented running activities used to train the models."""
 
 import copy
+import logging
 from typing import Self, cast
 from warnings import warn
 
@@ -23,6 +24,8 @@ from TrailPredictor.hashing import hash_dataframe
 from TrailPredictor.load_fit import ProgressCallback
 from TrailPredictor.speed_columns import TARGETS, Target, add_speed_columns
 from TrailPredictor.utils import COMPUTED_DIR
+
+logger = logging.getLogger(__name__)
 
 # Never used as predictors: identifiers, raw time information (elapsed_time and
 # timestamp give the pace directly), heart rate (consequence of the effort),
@@ -559,10 +562,10 @@ class Dataset:  # pylint: disable=too-many-public-methods
             target_name = target_name[4:]  # remove the "log_" prefix
 
         if target_name.startswith("accel_"):
-            print("accel", predicted)
+            logger.debug("Predicted acceleration:\n%s", predicted)
             elapsed_time = self._data["elapsed_time"].dt.total_seconds()
             predicted = predicted * elapsed_time
-            print("accel to speed", predicted)
+            logger.debug("Acceleration converted to speed:\n%s", predicted)
             target_name = target_name[6:]  # remove the "accel_" prefix
 
         if target_name == "pace":
