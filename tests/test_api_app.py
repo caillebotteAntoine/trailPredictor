@@ -69,6 +69,22 @@ def test_assets_referenced_by_the_page_exist(client: TestClient, path: str) -> N
     assert client.get(path).status_code == 200
 
 
+@pytest.mark.parametrize("path", ["/", "/js/app.js", "/lib/plotly.min.js"])
+def test_front_end_files_are_revalidated(client: TestClient, path: str) -> None:
+    response = client.get(path)
+
+    assert response.headers["cache-control"] == "no-cache"
+    assert "etag" in response.headers
+
+
+def test_unchanged_static_file_is_304(client: TestClient) -> None:
+    etag = client.get("/js/app.js").headers["etag"]
+
+    response = client.get("/js/app.js", headers={"If-None-Match": etag})
+
+    assert response.status_code == 304
+
+
 def test_unknown_static_file_is_404(client: TestClient) -> None:
     assert client.get("/missing.js").status_code == 404
 

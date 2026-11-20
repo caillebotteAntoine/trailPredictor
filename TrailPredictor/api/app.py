@@ -6,9 +6,10 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib import resources
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import TypeAdapter
 
@@ -33,6 +34,30 @@ SSE_KEEPALIVE_S = 15.0
 SSE_MEDIA_TYPE = "text/event-stream"
 
 _SNAPSHOT_JSON = TypeAdapter(JobSnapshot)
+# The front end changes with the code: the browser must revalidate its copy
+# (a cheap 304 thanks to the ETag) instead of reusing a stale one.
+REVALIDATE = {"Cache-Control": "no-cache"}
+
+
+class RevalidatedStaticFiles(StaticFiles):
+    """Static files that the browser revalidates at each use."""
+
+    def file_response(self, *args: Any, **kwargs: Any) -> Response:
+        """Return the file with a ``Cache-Control: no-cache`` header.
+
+        Parameters
+        ----------
+        *args, **kwargs
+            Arguments of `StaticFiles.file_response`.
+
+        Returns
+        -------
+        starlette.responses.Response
+            The file response.
+        """
+        response = super().file_response(*args, **kwargs)
+        response.headers.update(REVALIDATE)
+        return response
 
 
 def _job_manager(request: Request) -> JobManager:
@@ -206,7 +231,7 @@ def package_script(name: str) -> FileResponse:
         path = package_script_path(name)
     except KeyError:
         raise HTTPException(status_code=404, detail="Unknown script") from None
-    return FileResponse(path, media_type=JAVASCRIPT_MEDIA_TYPE)
+    return FileResponse(path, media_type=JAVASCRIPT_MEDIA_TYPE, headers=REVALIDATE)
 
 
 def create_app(
@@ -263,5 +288,7 @@ def create_app(
     app.include_router(activity_routes.router)
     app.include_router(assets_router)
     # mounted last: the API routes take precedence over the static files
-    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+    app.mount(
+        "/", RevalidatedStaticFiles(directory=static_dir, html=True), name="static"
+    )
     return app
