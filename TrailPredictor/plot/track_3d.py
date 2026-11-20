@@ -76,6 +76,9 @@ RGB_MAX = 255
 # pydeck turns plain strings into JavaScript accessor expressions ("@@=pixels"):
 # literal string properties must be wrapped in ``pdk.types.String``.
 PIXEL_UNITS = pdk.types.String("pixels")
+# Tooltip of the deck: the HTML of the "tooltip" field of the hovered point.
+# Not part of Deck.to_json(), so also sent apart to the browser.
+TRACK_TOOLTIP = {"html": "{tooltip}"}
 
 REQUIRED_COLUMNS = ("position_lat", "position_long", "altitude", "distance", "pause")
 
@@ -517,7 +520,7 @@ def build_track_map(
         initial_view_state=view_state,
         map_provider=None,
         map_style=None,
-        tooltip={"html": "{tooltip}"},
+        tooltip=TRACK_TOOLTIP,
     )
     vmin, vmax = color_bounds(values)
     legend = TrackLegend(

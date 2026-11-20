@@ -20,11 +20,12 @@
 
     <nav class="cards">
       <template x-for="page in pages" :key="page.id">
-        <article class="card" :class="{ disabled: !page.ready }">
+        <a class="card" :class="{ disabled: !page.ready }"
+           :href="page.ready ? page.href : null">
           <h2 x-text="page.title"></h2>
           <p x-text="page.description"></p>
           <span class="badge" x-show="!page.ready">Bientôt</span>
-        </article>
+        </a>
       </template>
     </nav>
   </main>

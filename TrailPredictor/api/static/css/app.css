@@ -117,3 +117,202 @@ main {
   border-radius: 999px;
   color: var(--muted);
 }
+
+a {
+  color: inherit;
+}
+
+.topbar h1 a {
+  text-decoration: none;
+}
+
+a.card {
+  display: block;
+  text-decoration: none;
+}
+
+a.card:hover {
+  border-color: var(--accent);
+}
+
+/* --- Page with a sidebar */
+
+.layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  min-height: calc(100vh - 3.5rem);
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 1rem 1.25rem;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+
+.sidebar h2 {
+  margin: 0.5rem 0 0;
+  font-size: 1rem;
+}
+
+.sidebar fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.sidebar legend,
+.field {
+  font-size: 0.9rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.field small {
+  color: var(--muted);
+}
+
+.sidebar select {
+  width: 100%;
+  padding: 0.3rem;
+}
+
+.checkbox {
+  font-size: 0.9rem;
+}
+
+.content {
+  min-width: 0;
+  padding: 1rem 1.5rem 2rem;
+}
+
+.content h2 {
+  margin-top: 0;
+}
+
+/* --- Feedback */
+
+.alert {
+  padding: 0.6rem 0.9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.alert.error {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.alert.warning {
+  border-color: #e8a317;
+}
+
+.progress {
+  position: relative;
+  height: 1.6rem;
+  margin-bottom: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--accent);
+  opacity: 0.35;
+  transition: width 0.2s;
+}
+
+.progress span {
+  position: absolute;
+  inset: 0;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.85rem;
+}
+
+/* --- Activity page */
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  padding: 0.6rem 0.9rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.metric-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.metric-value {
+  font-size: 1.4rem;
+}
+
+.track-map {
+  position: relative;
+  height: 500px;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.legend .gradient {
+  display: inline-block;
+  width: 12rem;
+  height: 0.8rem;
+}
+
+.legend small {
+  width: 100%;
+  color: var(--muted);
+}
+
+.charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.chart {
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+@media (max-width: 900px) {
+  .layout,
+  .charts {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}

@@ -4,18 +4,28 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from importlib import resources
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import TypeAdapter
 
+from TrailPredictor.api import activity_routes
+from TrailPredictor.api.activity_service import ActivityService
 from TrailPredictor.api.jobs import JobManager, JobSnapshot, UnknownJobError
 
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
+# JavaScript libraries bundled with the Python packages: served from there,
+# their version always matches the JSON produced by plotly and pydeck.
+PACKAGE_SCRIPTS = {
+    "plotly.min.js": ("plotly", "package_data/plotly.min.js"),
+    "deckgl.min.js": ("pydeck", "nbextension/static/index.js"),
+}
+JAVASCRIPT_MEDIA_TYPE = "text/javascript"
 APP_TITLE = "Trail Predictor"
 # Longest wait between two server-sent events; a comment line keeps the
 # connection alive and lets the server notice a closed client.
@@ -148,8 +158,61 @@ def job_event_stream(job_id: str, request: Request) -> StreamingResponse:
     )
 
 
+def package_script_path(name: str) -> Path:
+    """Return the file of a JavaScript library shipped by a Python package.
+
+    Parameters
+    ----------
+    name : str
+        Key of ``PACKAGE_SCRIPTS``.
+
+    Returns
+    -------
+    pathlib.Path
+        Path of the script in the installed package.
+
+    Raises
+    ------
+    KeyError
+        If `name` is not in ``PACKAGE_SCRIPTS``.
+    """
+    package, relative_path = PACKAGE_SCRIPTS[name]
+    return Path(str(resources.files(package).joinpath(relative_path)))
+
+
+assets_router = APIRouter()
+
+
+@assets_router.get("/lib/{name}", include_in_schema=False)
+def package_script(name: str) -> FileResponse:
+    """Serve a JavaScript library shipped by a Python package.
+
+    Parameters
+    ----------
+    name : str
+        Key of ``PACKAGE_SCRIPTS``.
+
+    Returns
+    -------
+    fastapi.responses.FileResponse
+        The script.
+
+    Raises
+    ------
+    fastapi.HTTPException
+        404 if `name` is unknown.
+    """
+    try:
+        path = package_script_path(name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Unknown script") from None
+    return FileResponse(path, media_type=JAVASCRIPT_MEDIA_TYPE)
+
+
 def create_app(
-    job_manager: JobManager | None = None, static_dir: Path = STATIC_DIR
+    job_manager: JobManager | None = None,
+    static_dir: Path = STATIC_DIR,
+    activity_service: ActivityService | None = None,
 ) -> FastAPI:
     """Build the application: the ``/api`` routes and the static front end.
 
@@ -161,6 +224,9 @@ def create_app(
     static_dir : pathlib.Path, optional
         Directory of the front end, whose ``index.html`` is served at ``/``.
         Default is ``STATIC_DIR``.
+    activity_service : ActivityService or None, optional
+        Catalogue and cache of the activities. Default is None: an
+        `ActivityService` reading the data directory.
 
     Returns
     -------
@@ -190,7 +256,12 @@ def create_app(
 
     app = FastAPI(title=APP_TITLE, lifespan=lifespan)
     app.state.job_manager = manager
+    app.state.activity_service = (
+        ActivityService() if activity_service is None else activity_service
+    )
     app.include_router(router)
+    app.include_router(activity_routes.router)
+    app.include_router(assets_router)
     # mounted last: the API routes take precedence over the static files
     app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
     return app

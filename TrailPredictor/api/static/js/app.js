@@ -7,7 +7,8 @@ const PAGES = [
     id: "activities",
     title: "Activités",
     description: "Métriques, carte 3D et graphiques d'une sortie.",
-    ready: false,
+    href: "activities.html",
+    ready: true,
   },
   {
     id: "dataset",

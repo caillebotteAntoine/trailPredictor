@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Activités — Trail Predictor</title>
+  <link rel="stylesheet" href="css/app.css">
+  <script src="lib/plotly.min.js"></script>
+  <script src="lib/deckgl.min.js"></script>
+  <!-- modules run before Alpine (deferred scripts keep the document order) -->
+  <script type="module" src="js/activities.js"></script>
+  <script defer src="vendor/alpine-3.14.9.min.js"></script>
+</head>
+<body x-data="activityPage">
+  <header class="topbar">
+    <h1><a href="index.html">Trail Predictor</a> · Activités</h1>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <fieldset>
+        <legend>Ordre des activités</legend>
+        <label><input type="radio" value="desc" x-model="order"> Décroissant</label>
+        <label><input type="radio" value="asc" x-model="order"> Croissant</label>
+      </fieldset>
+
+      <label class="field">Activité
+        <select x-model.number="activityId" @change="loadActivity()" :disabled="!activities.length">
+          <template x-for="activity in sortedActivities" :key="activity.id">
+            <option :value="activity.id" x-text="activityLabel(activity)"></option>
+          </template>
+        </select>
+      </label>
+
+      <h2>Options</h2>
+      <label class="field">Taille des segments : <span x-text="`${options.segmentWidth} m`"></span>
+        <input type="range" min="5" max="1000" step="5"
+               x-model.number="options.segmentWidth" @change="loadActivity()">
+        <small>Granularité utilisée pour agréger les données FIT.</small>
+      </label>
+      <label class="field">Seuil de dénivelé : <span x-text="`${options.dropThreshold} m`"></span>
+        <input type="range" min="0.5" max="10" step="0.5"
+               x-model.number="options.dropThreshold" @change="refreshAll()">
+      </label>
+      <label class="field">Couleur de la carte
+        <select x-model="options.colorBy" @change="refreshTrack()">
+          <option value="altitude">Altitude</option>
+          <option value="heart_rate">Fréquence cardiaque</option>
+          <option value="pace">Allure</option>
+        </select>
+      </label>
+      <fieldset>
+        <legend>Axe de la FC</legend>
+        <label><input type="radio" value="distance" x-model="options.xAxis" @change="refreshCharts()"> Distance</label>
+        <label><input type="radio" value="time" x-model="options.xAxis" @change="refreshCharts()"> Temps</label>
+      </fieldset>
+      <fieldset>
+        <legend>Fond de la carte 3D</legend>
+        <label><input type="radio" value="osm" x-model="options.texture" @change="refreshTrack()"> OpenStreetMap</label>
+        <label><input type="radio" value="satellite" x-model="options.texture" @change="refreshTrack()"> Satellite</label>
+      </fieldset>
+      <label class="checkbox">
+        <input type="checkbox" x-model="options.showKmMarkers" @change="refreshTrack()">
+        Afficher les repères kilométriques
+      </label>
+    </aside>
+
+    <main class="content">
+      <h2>Analyse d'activité Strava</h2>
+
+      <p class="alert error" x-show="error" x-text="error"></p>
+
+      <div class="progress" x-show="progress !== null">
+        <div class="progress-bar" :style="`width: ${Math.round((progress ?? 0) * 100)}%`"></div>
+        <span x-text="progressMessage"></span>
+      </div>
+
+      <section class="metrics" x-show="metrics">
+        <template x-for="metric in metricCards" :key="metric.label">
+          <div class="metric">
+            <span class="metric-label" x-text="metric.label"></span>
+            <span class="metric-value" x-text="metric.value"></span>
+          </div>
+        </template>
+      </section>
+
+      <section class="track" x-show="track || trackError">
+        <p class="alert warning" x-show="trackError" x-text="`Parcours GPS : ${trackError}`"></p>
+        <div class="track-map" x-ref="trackMap" x-show="track"></div>
+        <p class="legend" x-show="track">
+          <strong x-text="track?.legend.label"></strong>
+          <span x-text="track?.legend.vmin_text"></span>
+          <span class="gradient" :style="`background: ${track?.legend.css_gradient}`"></span>
+          <span x-text="track?.legend.vmax_text"></span>
+          <small x-text="`${track?.legend.attribution} · Elevation: AWS Terrain Tiles`"></small>
+        </p>
+      </section>
+
+      <section class="charts" x-show="metrics">
+        <template x-for="chart in charts" :key="chart.name">
+          <div class="chart">
+            <p class="alert warning" x-show="chartErrors[chart.name]"
+               x-text="`${chart.title} : ${chartErrors[chart.name]}`"></p>
+            <div class="chart-plot" :id="`chart-${chart.name}`"></div>
+          </div>
+        </template>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
