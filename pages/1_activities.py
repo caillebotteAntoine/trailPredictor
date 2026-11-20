@@ -12,6 +12,7 @@ import pandas as pd
 import streamlit as st
 
 from TrailPredictor.activities import RunningActivities
+from TrailPredictor.activity_metrics import compute_activity_metrics
 from TrailPredictor.loading import (
     activity_file_name,
     load_activities,
@@ -157,19 +158,25 @@ def render_metrics(plot: PlotActivities) -> None:
     plot : PlotActivities
         Activity to summarise.
     """
-    data = plot.data
-    distance = pd.to_numeric(data.get("distance"), errors="coerce").max() / 1000
-    duration = data["elapsed_time"].dt.total_seconds().sum()
-    drop = pd.to_numeric(data.get("altitude"), errors="coerce").diff().clip(upper=0)
-    elevation = drop.sum()
-    average_pace = duration / 60 / distance if distance > 0 else np.nan
-    average_hr = pd.to_numeric(data.get("heart_rate"), errors="coerce").mean()
+    metrics = compute_activity_metrics(plot.data)
     metric_values = [
-        ("Distance", _metric_value(distance, lambda x: f"{x:.2f} km")),
-        ("Durée", _metric_value(duration, lambda x: str(pd.Timedelta(seconds=x)))),
-        ("Dénivelé positif", _metric_value(elevation, lambda x: f"{x:.0f} m")),
-        ("Allure moyenne", _metric_value(average_pace, lambda x: f"{x:.2f} min/km")),
-        ("FC moyenne", _metric_value(average_hr, lambda x: f"{x:.0f} bpm")),
+        ("Distance", _metric_value(metrics.distance_km, lambda x: f"{x:.2f} km")),
+        (
+            "Durée",
+            _metric_value(metrics.duration_s, lambda x: str(pd.Timedelta(seconds=x))),
+        ),
+        (
+            "Dénivelé positif",
+            _metric_value(metrics.elevation_gain_m, lambda x: f"{x:.0f} m"),
+        ),
+        (
+            "Allure moyenne",
+            _metric_value(metrics.average_pace_min_per_km, lambda x: f"{x:.2f} min/km"),
+        ),
+        (
+            "FC moyenne",
+            _metric_value(metrics.average_heart_rate_bpm, lambda x: f"{x:.0f} bpm"),
+        ),
     ]
     available = [(label, value) for label, value in metric_values if value is not None]
     for column, (label, value) in zip(st.columns(len(available)), available):
