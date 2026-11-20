@@ -33,3 +33,7 @@ data/
 
 work/
 work_*
+
+# PyInstaller build of the desktop app
+build/
+dist/
