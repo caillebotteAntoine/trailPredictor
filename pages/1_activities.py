@@ -12,7 +12,12 @@ import pandas as pd
 import streamlit as st
 
 from TrailPredictor.activities import RunningActivities
-from TrailPredictor.loading import load_activities
+from TrailPredictor.loading import (
+    activity_file_name,
+    load_activities,
+    parse_strava_date,
+    running_activities,
+)
 from TrailPredictor.plot import PlotActivities
 
 TRACK_MAP_HEIGHT = 500  # px
@@ -27,30 +32,7 @@ def st_load_activities() -> pd.DataFrame:
     pandas.DataFrame
         Summary rows of the ``run`` activities.
     """
-    activities = load_activities()
-    return pd.DataFrame(activities.loc[activities["type"].eq("run")])
-
-
-def _parse_date(value: Any) -> pd.Timestamp:
-    """Parse a French date of the Strava export."""
-    replacements = {
-        "janv.": "Jan",
-        "févr.": "Feb",
-        "mars": "Mar",
-        "avr.": "Apr",
-        "mai": "May",
-        "juin": "Jun",
-        "juil.": "Jul",
-        "août": "Aug",
-        "sept.": "Sep",
-        "oct.": "Oct",
-        "nov.": "Nov",
-        "déc.": "Dec",
-    }
-    text = str(value)
-    for french, english in replacements.items():
-        text = text.replace(french, english)
-    return pd.to_datetime(text, errors="coerce", dayfirst=True)
+    return running_activities(load_activities())
 
 
 def format_label(activity: pd.Series) -> str:
@@ -67,7 +49,7 @@ def format_label(activity: pd.Series) -> str:
     str
         Label ``"<distance> km — <YYYY-MM-DD> — <name>"``.
     """
-    date = _parse_date(activity["date"])
+    date = parse_strava_date(activity["date"])
     date_text = date.strftime("%Y-%m-%d") if not pd.isna(date) else "date inconnue"
     distance = activity["distance_m"] / 1000
     distance_text = f"{distance:.1f}" if pd.notna(distance) else "—"
@@ -95,15 +77,12 @@ def load_activity(
 
     Raises
     ------
-    ValueError
+    UnknownActivityError
         If `activity_id` is not in the summary.
     """
-    activities = st_load_activities()
-    matches = activities.loc[activities["id"].eq(activity_id), "file_name"]
-    if matches.empty:
-        raise ValueError(f"Activité inconnue : {activity_id}")
+    file_name = activity_file_name(st_load_activities(), activity_id)
     return RunningActivities.from_computed_file(
-        str(matches.iloc[0]), segment_width=segment_width, progress_cb=_progress_cb
+        file_name, segment_width=segment_width, progress_cb=_progress_cb
     )
 
 

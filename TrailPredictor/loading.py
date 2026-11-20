@@ -1,11 +1,34 @@
 """Loading of the Strava activity summary export."""
 
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 ACTIVITIES_FILE = DATA_DIR / "activities.csv"
+RUN_TYPE = "run"
+
+# French month abbreviations of the Strava export, e.g. "12 janv. 2026, 08:00:00"
+FRENCH_MONTHS = {
+    "janv.": "Jan",
+    "févr.": "Feb",
+    "mars": "Mar",
+    "avr.": "Apr",
+    "mai": "May",
+    "juin": "Jun",
+    "juil.": "Jul",
+    "août": "Aug",
+    "sept.": "Sep",
+    "oct.": "Oct",
+    "nov.": "Nov",
+    "déc.": "Dec",
+}
+
+
+class UnknownActivityError(ValueError):
+    """Raised when an activity identifier is not in the summary."""
+
 
 activity_type_map = {
     "Course à pied": "run",
@@ -186,3 +209,71 @@ def load_activities() -> pd.DataFrame:
         activities = activities.drop(columns=["type_na"])
 
     return activities
+
+
+def running_activities(activities: pd.DataFrame) -> pd.DataFrame:
+    """Keep the running activities of the summary.
+
+    Parameters
+    ----------
+    activities : pandas.DataFrame
+        Summary returned by `load_activities`, with a ``type`` column.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Copy of the rows whose type is ``RUN_TYPE``, with their original index.
+    """
+    return activities.loc[activities["type"].eq(RUN_TYPE)].copy()
+
+
+def parse_strava_date(value: object) -> pd.Timestamp:
+    """Parse a French date of the Strava export.
+
+    Parameters
+    ----------
+    value : object
+        Date as written in the export, e.g. ``"12 janv. 2026, 08:00:00"``.
+
+    Returns
+    -------
+    pandas.Timestamp
+        Parsed date, or ``NaT`` if it cannot be parsed.
+
+    Examples
+    --------
+    >>> parse_strava_date("3 févr. 2026, 07:30:00")
+    Timestamp('2026-02-03 07:30:00')
+    """
+    text = str(value)
+    # loop over the twelve months, not over the data
+    for french, english in FRENCH_MONTHS.items():
+        text = text.replace(french, english)
+    # NaT (unparsable date) is the missing-value Timestamp, checked by pd.isna
+    return cast(pd.Timestamp, pd.to_datetime(text, errors="coerce", dayfirst=True))
+
+
+def activity_file_name(activities: pd.DataFrame, activity_id: int) -> str:
+    """Return the FIT file name of an activity of the summary.
+
+    Parameters
+    ----------
+    activities : pandas.DataFrame
+        Summary with the ``id`` and ``file_name`` columns.
+    activity_id : int
+        Strava identifier of the activity.
+
+    Returns
+    -------
+    str
+        File name of the first row of `activity_id`, relative to ``DATA_DIR``.
+
+    Raises
+    ------
+    UnknownActivityError
+        If `activity_id` is not in `activities`.
+    """
+    matches = activities.loc[activities["id"].eq(activity_id), "file_name"]
+    if matches.empty:
+        raise UnknownActivityError(f"Unknown activity: {activity_id}")
+    return str(matches.iloc[0])
