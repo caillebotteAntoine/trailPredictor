@@ -26,6 +26,8 @@ __pycache__/
 
 # Saved html and csv or data files
 *.html
+# ...except the pages of the desktop front end
+!TrailPredictor/api/static/**/*.html
 *.csv
 data/
 
