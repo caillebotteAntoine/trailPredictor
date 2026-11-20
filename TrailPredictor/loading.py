@@ -1,11 +1,11 @@
 """Loading of the Strava activity summary export."""
 
-from pathlib import Path
 from typing import cast
 
 import pandas as pd
 
-DATA_DIR = Path(__file__).parent.parent / "data"
+from TrailPredictor.utils import DATA_DIR
+
 ACTIVITIES_FILE = DATA_DIR / "activities.csv"
 RUN_TYPE = "run"
 
