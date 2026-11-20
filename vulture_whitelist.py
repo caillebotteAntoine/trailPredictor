@@ -10,6 +10,7 @@ notebooks stop using it.
 
 import plotly.graph_objects as go
 
+from TrailPredictor.activities import RunningActivities
 from TrailPredictor.dataset import Dataset
 from TrailPredictor.modeling import candidates
 from TrailPredictor.modeling.config import ModelConfig
@@ -44,6 +45,9 @@ PlotHeartRate.best_zones_per_n
 ModelingLasso.evaluate_selection
 ModelingLasso.plot
 PlotLasso.regularization_path
+
+# --- Prediction of a planned race from its GPX route
+RunningActivities.from_gpx_file
 
 # --- False positives
 # Attribute of a plotly trace, set in PlotDataset.merge_figure.

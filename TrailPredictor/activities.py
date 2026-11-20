@@ -3,9 +3,11 @@
 from pathlib import Path
 from warnings import warn
 
+import numpy as np
 import pandas as pd
 
 from TrailPredictor.load_fit import ProgressCallback, load_fit_file
+from TrailPredictor.load_gpx import TRACK_POINT_COLUMNS, gpx_track_points, load_gpx_file
 from TrailPredictor.speed_columns import add_speed_columns
 from TrailPredictor.utils import COMPUTED_DIR, DATA_DIR
 
@@ -300,6 +302,144 @@ class RunningActivities:
             path.parent.mkdir(parents=True, exist_ok=True)
 
         activity._data.to_csv(path, index=False)
+
+        if progress_cb:
+            progress_cb(1.0, "Activité chargée")
+        return activity
+
+    @classmethod
+    def from_track_points(
+        cls, points: pd.DataFrame, segment_width: int = 100
+    ) -> "RunningActivities":
+        """Create a planned activity (a route, without time) from track points.
+
+        The points are grouped into segments of `segment_width` metres as in
+        ``from_fit_record``, but only the distance, the altitude, the position
+        and the elevation changes are filled: the time, heart-rate, speed and
+        pace columns are present but missing, ready to be predicted.
+
+        Parameters
+        ----------
+        points : pandas.DataFrame
+            Track points ordered along the route, with cumulative
+            ``distance`` (metres), ``altitude`` (metres), ``position_lat``
+            and ``position_long`` (degrees) columns. It is not modified.
+        segment_width : int, optional
+            Segment length in metres. Default is 100.
+
+        Returns
+        -------
+        RunningActivities
+            The segmented activity, with the same columns as
+            ``from_fit_record``.
+
+        Raises
+        ------
+        ValueError
+            If `points` is empty or misses a column.
+
+        See Also
+        --------
+        from_gpx_file : Read the track points from a GPX file first.
+        """
+        missing = set(TRACK_POINT_COLUMNS) - set(points.columns)
+        if missing:
+            raise ValueError(f"Track points miss the columns {sorted(missing)}.")
+        if points.empty:
+            raise ValueError("Cannot build an activity from no track point.")
+
+        altitude_change = points["altitude"].diff().fillna(0.0)
+        segments = (
+            points.assign(
+                drop_pos=altitude_change.clip(lower=0),
+                drop_neg=altitude_change.clip(upper=0),
+                segment=(points["distance"] // segment_width).astype(int),
+            )
+            .groupby("segment")
+            .agg(
+                altitude=("altitude", "mean"),
+                position_lat=("position_lat", "mean"),
+                position_long=("position_long", "mean"),
+                drop_pos=("drop_pos", "sum"),
+                drop_neg=("drop_neg", "sum"),
+            )
+            .reset_index(drop=False)
+        )
+        n_segments = len(segments)
+        segments = segments.assign(
+            # upper bound of each segment, as segment_end in from_fit_record
+            distance=(segments["segment"] + 1) * segment_width,
+            timestamp=pd.Series(pd.NaT, index=segments.index, dtype="datetime64[ns]"),
+            elapsed_time=pd.to_timedelta(np.full(n_segments, np.nan), unit="s"),
+            heart_rate=np.full(n_segments, np.nan),
+            speed=np.full(n_segments, np.nan),
+        )[
+            [
+                "segment",
+                "elapsed_time",
+                "timestamp",
+                "distance",
+                "heart_rate",
+                "altitude",
+                "position_lat",
+                "position_long",
+                "drop_pos",
+                "drop_neg",
+                "speed",
+            ]
+        ]
+        return cls(add_speed_columns(segments))
+
+    @classmethod
+    def from_gpx_file(
+        cls,
+        file_path: str,
+        segment_width: int = 100,
+        progress_cb: ProgressCallback | None = None,
+    ) -> "RunningActivities":
+        """Create a planned activity (a route, without time) from a GPX file.
+
+        Parameters
+        ----------
+        file_path : str
+            Path of the GPX file, relative to ``DATA_DIR``.
+        segment_width : int, optional
+            Segment length in metres. Default is 100.
+        progress_cb : ProgressCallback, optional
+            Called with ``(fraction, message)`` while loading.
+
+        Returns
+        -------
+        RunningActivities
+            The segmented activity, named after the GPX metadata (or the file
+            name), with only the distance, altitude, position and elevation
+            changes filled.
+
+        Raises
+        ------
+        TrailPredictor.load_gpx.EmptyGpxError
+            If the file holds no track point with an elevation.
+
+        See Also
+        --------
+        from_track_points : Segmentation of the track points.
+        """
+        path = DATA_DIR / file_path
+        gpx = load_gpx_file(
+            path,
+            progress_cb=(
+                (lambda fraction, text: progress_cb(fraction * 0.7, text))
+                if progress_cb
+                else None
+            ),
+        )
+        if progress_cb:
+            progress_cb(0.7, "Construction de l'activité...")
+
+        activity = cls.from_track_points(
+            gpx_track_points(gpx), segment_width=segment_width
+        )
+        activity.name = gpx.name or path.stem
 
         if progress_cb:
             progress_cb(1.0, "Activité chargée")
