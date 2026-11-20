@@ -13,8 +13,9 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import TypeAdapter
 
-from TrailPredictor.api import activity_routes
+from TrailPredictor.api import activity_routes, dataset_routes
 from TrailPredictor.api.activity_service import ActivityService
+from TrailPredictor.api.dataset_service import DatasetService
 from TrailPredictor.api.jobs import JobManager, JobSnapshot, UnknownJobError
 
 logger = logging.getLogger(__name__)
@@ -238,6 +239,7 @@ def create_app(
     job_manager: JobManager | None = None,
     static_dir: Path = STATIC_DIR,
     activity_service: ActivityService | None = None,
+    dataset_service: DatasetService | None = None,
 ) -> FastAPI:
     """Build the application: the ``/api`` routes and the static front end.
 
@@ -252,6 +254,9 @@ def create_app(
     activity_service : ActivityService or None, optional
         Catalogue and cache of the activities. Default is None: an
         `ActivityService` reading the data directory.
+    dataset_service : DatasetService or None, optional
+        Cache of the datasets and dataset chosen in the dataset page. Default
+        is None: a `DatasetService` reading the data directory.
 
     Returns
     -------
@@ -284,8 +289,12 @@ def create_app(
     app.state.activity_service = (
         ActivityService() if activity_service is None else activity_service
     )
+    app.state.dataset_service = (
+        DatasetService() if dataset_service is None else dataset_service
+    )
     app.include_router(router)
     app.include_router(activity_routes.router)
+    app.include_router(dataset_routes.router)
     app.include_router(assets_router)
     # mounted last: the API routes take precedence over the static files
     app.mount(

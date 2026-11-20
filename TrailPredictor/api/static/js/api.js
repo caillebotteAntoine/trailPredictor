@@ -15,7 +15,10 @@ export async function fetchJson(url, options = {}) {
     ...options,
   });
   if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText} (${url})`);
+    // FastAPI errors carry a "detail": a message, or the validation errors
+    const body = await response.json().catch(() => null);
+    const detail = typeof body?.detail === "string" ? body.detail : response.statusText;
+    throw new Error(`${detail} (${response.status})`);
   }
   return response.json();
 }

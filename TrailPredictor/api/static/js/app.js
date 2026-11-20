@@ -14,7 +14,8 @@ const PAGES = [
     id: "dataset",
     title: "Dataset / Features",
     description: "Corrélations et graphiques des features du dataset.",
-    ready: false,
+    href: "dataset.html",
+    ready: true,
   },
   {
     id: "heart-rate",

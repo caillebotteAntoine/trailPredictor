@@ -11,9 +11,10 @@ notebooks stop using it.
 import plotly.graph_objects as go
 import uvicorn
 
-from TrailPredictor.api import activity_routes
+from TrailPredictor.api import activity_routes, dataset_routes
 from TrailPredictor.api import app as api_app
 from TrailPredictor.api.activity_service import ActivitySummary, TrackView
+from TrailPredictor.api.dataset_service import FeatureRow, SavedZones
 from TrailPredictor.dataset import Dataset
 from TrailPredictor.modeling import candidates
 from TrailPredictor.modeling.config import ModelConfig
@@ -63,8 +64,18 @@ api_app.package_script
 activity_routes.list_activities
 activity_routes.activity_charts
 activity_routes.activity_track
+dataset_routes.dataset_features
+dataset_routes.dataset_preset
+dataset_routes.dataset_chart_view
+dataset_routes.parsed_cuts
+dataset_routes.dataset_saved_zones
+dataset_routes.current_dataset
+dataset_routes.select_dataset
 # Fields of API responses, serialized to JSON by FastAPI.
 ActivitySummary.id
 TrackView.tooltip
+FeatureRow.spearman
+FeatureRow.missing_pct
+SavedZones.config_key
 # Read by the uvicorn server loop, set in BackgroundServer.stop.
 uvicorn.Server.should_exit  # pylint: disable=no-member  # instance attribute
