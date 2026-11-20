@@ -1,6 +1,8 @@
 """Dataset of segmented running activities used to train the models."""
 
 import copy
+import hashlib
+import json
 from typing import Self, cast
 from warnings import warn
 
@@ -21,6 +23,7 @@ from TrailPredictor.features import (
 )
 from TrailPredictor.hashing import hash_dataframe
 from TrailPredictor.load_fit import ProgressCallback
+from TrailPredictor.modeling.config import KEY_LENGTH
 from TrailPredictor.speed_columns import TARGETS, Target, add_speed_columns
 from TrailPredictor.utils import COMPUTED_DIR
 
@@ -243,6 +246,25 @@ class Dataset:  # pylint: disable=too-many-public-methods
             self._data.drop(columns=PREDICTION_COLUMNS, errors="ignore"),
             sort_by=sort_by,
         )
+
+    @property
+    def features_key(self) -> str:
+        """Return a short hash identifying the selected features.
+
+        The hash ignores the order of the features, so two datasets selecting
+        the same columns share the key.
+
+        Returns
+        -------
+        str
+            First ``KEY_LENGTH`` hexadecimal characters of the SHA-256 hash.
+
+        See Also
+        --------
+        key : Hash of the data, which ignores the selected features.
+        """
+        payload = json.dumps(sorted(self._features)).encode()
+        return hashlib.sha256(payload).hexdigest()[:KEY_LENGTH]
 
     def get_preprocess(self):
         """Build the preprocessing step that standardises the features.

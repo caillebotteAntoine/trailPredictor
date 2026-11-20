@@ -1,5 +1,6 @@
 """Tests for :class:`TrailPredictor.modeling.base_model.BaseModeling`."""
 
+import copy
 import json
 from pathlib import Path
 from typing import ClassVar
@@ -46,7 +47,11 @@ def test_cannot_instantiate_abstract_base(
 
 def test_result_path(model: LinearModeling, tmp_path: Path) -> None:
     assert model.result_path == (
-        tmp_path / "linear" / model.dataset.key / "pace" / f"{model.config.key}.csv"
+        tmp_path
+        / "linear"
+        / model.dataset.key
+        / "pace"
+        / f"{model.config.key}_{model.dataset.features_key}.csv"
     )
 
 
@@ -70,6 +75,7 @@ def test_save_and_reload(model: LinearModeling, tmp_path: Path) -> None:
     assert json.loads(path.with_suffix(".json").read_text()) == {
         "dataset_name": None,
         "dataset_key": model.dataset.key,
+        "features": model.dataset.features,
         "config": {"seed": SEED, "n_splits": N_SPLITS, "test_size": TEST_SIZE},
     }
 
@@ -93,6 +99,17 @@ def test_other_config_does_not_reload(model: LinearModeling, tmp_path: Path) -> 
     model.save_result()
 
     other = LinearModeling(model.dataset, ModelConfig(seed=0), models_dir=tmp_path)
+
+    assert other.result is None
+
+
+def test_other_features_do_not_reload(model: LinearModeling, tmp_path: Path) -> None:
+    model.result = pd.DataFrame({"rmse": [0.5]})
+    model.save_result()
+    subset = copy.copy(model.dataset)
+    subset.features = model.dataset.features[1:]
+
+    other = LinearModeling(subset, model.config, models_dir=tmp_path)
 
     assert other.result is None
 

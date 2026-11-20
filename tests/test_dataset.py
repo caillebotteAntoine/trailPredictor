@@ -157,6 +157,23 @@ def test_key_changes_with_heart_rate_zones(ds: Dataset) -> None:
     assert ds.with_heart_rate_zones(TWO_ZONES).key != ds.key
 
 
+def test_features_key_ignores_order(ds: Dataset) -> None:
+    ds.features = ["slope", "running_cost"]
+    key = ds.features_key
+
+    ds.features = ["running_cost", "slope"]
+
+    assert ds.features_key == key
+
+
+def test_features_key_changes_with_features(ds: Dataset) -> None:
+    key = ds.features_key
+
+    ds.features = ["slope"]
+
+    assert ds.features_key != key
+
+
 @pytest.mark.parametrize(
     ("features", "onehot"),
     [

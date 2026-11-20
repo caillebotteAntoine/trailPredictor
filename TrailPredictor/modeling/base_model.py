@@ -28,8 +28,9 @@ class BaseModeling[ConfigT: ModelConfig](ABC):
 
     The model holds a reference to the dataset (composition) and never
     modifies it. Its result is stored as a CSV file keyed by the model name,
-    the dataset hash, the target and the configuration hash, with the dataset
-    hash and the configuration dumped as JSON next to it. A result is thus
+    the dataset hash, the target, the configuration hash and the hash of the
+    selected features, with the dataset hash, the features and the
+    configuration dumped as JSON next to it. A result is thus
     only reloaded for the very data it was computed on.
 
     Parameters
@@ -82,26 +83,28 @@ class BaseModeling[ConfigT: ModelConfig](ABC):
         Returns
         -------
         pathlib.Path
-            ``<models_dir>/<name>/<dataset key>/<target>/<config key>.csv``.
+            ``<models_dir>/<name>/<dataset key>/<target>/<config key>_<features
+            key>.csv``.
 
         See Also
         --------
         TrailPredictor.dataset.Dataset.key : Hash of the data of the dataset.
+        TrailPredictor.dataset.Dataset.features_key : Hash of the features.
         """
         return (
             self._models_dir
             / self.name
             / self._dataset.key
             / self._dataset.target_name
-            / f"{self._config.key}.csv"
+            / f"{self._config.key}_{self._dataset.features_key}.csv"
         )
 
     def save_result(self) -> Path:
         """Save the result as CSV, and its metadata as JSON next to it.
 
         The JSON file holds the dataset name (null if it has none), the
-        dataset key and the configuration, so a result can be traced back to
-        the data it was computed on.
+        dataset key, the selected features and the configuration, so a result
+        can be traced back to the data it was computed on.
 
         Returns
         -------
@@ -121,6 +124,7 @@ class BaseModeling[ConfigT: ModelConfig](ABC):
         metadata = {
             "dataset_name": self._dataset.name,
             "dataset_key": self._dataset.key,
+            "features": self._dataset.features,
             "config": self._config.model_dump(mode="json"),
         }
         path.with_suffix(".json").write_text(json.dumps(metadata, indent=2))
