@@ -417,10 +417,13 @@ class Dataset:  # pylint: disable=too-many-public-methods
         """
         train_data, test_data = split_test_train(self.data, test_size, random_state)
         target_name = self.target_name
-        return (
-            Dataset(train_data, target_name, name=self._suffixed_name("train")),
-            Dataset(test_data, target_name, name=self._suffixed_name("test")),
-        )
+        train = Dataset(train_data, target_name, name=self._suffixed_name("train"))
+        test = Dataset(test_data, target_name, name=self._suffixed_name("test"))
+
+        train.features = self.features
+        test.features = self.features
+
+        return (train, test)
 
     def _suffixed_name(self, suffix: str) -> str | None:
         return None if self._name is None else f"{self._name}_{suffix}"
