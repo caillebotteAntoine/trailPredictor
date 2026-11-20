@@ -37,12 +37,12 @@ def test_with_heart_rate_zones_leaves_dataset_unchanged(ds: Dataset) -> None:
 
 def test_with_heart_rate_zones_keeps_target_and_features(ds: Dataset) -> None:
     ds.target = "speed"
-    ds.features = ["slope", "heart_rate_zone"]
+    ds.features = ["slope", "heart_rate_zone", "drop_category"]
 
     zoned = ds.with_heart_rate_zones(TWO_ZONES)
 
     assert zoned.target_name == "speed"
-    assert zoned.features == ["slope", "heart_rate_zone"]
+    assert zoned.features == ["slope", "heart_rate_zone", "drop_category"]
     assert zoned.get_preprocess().transformers[1][1].categories == [
         ["low", "high"],
         ["Flat", "Uphill", "Downhill"],
@@ -155,6 +155,35 @@ def test_single_activity_has_key(dataset: pd.DataFrame) -> None:
 
 def test_key_changes_with_heart_rate_zones(ds: Dataset) -> None:
     assert ds.with_heart_rate_zones(TWO_ZONES).key != ds.key
+
+
+@pytest.mark.parametrize(
+    ("features", "onehot"),
+    [
+        (["slope"], []),
+        (["slope", "drop_category"], ["drop_category"]),
+        (["slope", "heart_rate_zone"], ["heart_rate_zone"]),
+    ],
+)
+def test_preprocess_onehot_only_selected_categorical(
+    ds: Dataset, features: list[str], onehot: list[str]
+) -> None:
+    ds.features = features
+
+    assert ds.get_preprocess().transformers[1][2] == onehot
+
+
+def test_preprocess_fits_without_heart_rate_zone(ds: Dataset) -> None:
+    ds.features = ["slope", "drop_category"]
+
+    transformed = ds.get_preprocess().fit_transform(ds.predictors)
+
+    assert sorted(transformed.columns) == [
+        "drop_category_Downhill",
+        "drop_category_Flat",
+        "drop_category_Uphill",
+        "slope",
+    ]
 
 
 def test_dataset_name_from_load_parameters() -> None:

@@ -270,7 +270,7 @@ class Dataset:  # pylint: disable=too-many-public-methods
         to_onehot = []
         categories = []
         for cat_col in CATEGORICAL_COLUMNS:
-            if cat_col in CATEGORICAL_COLUMNS:
+            if cat_col in self._features:
                 to_onehot.append(cat_col)
 
                 if cat_col == "heart_rate_zone":
