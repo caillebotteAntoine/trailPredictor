@@ -3,7 +3,6 @@
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel
 
 from TrailPredictor.api.activity_service import (
     ActivityNotLoadedError,
@@ -15,7 +14,7 @@ from TrailPredictor.api.activity_service import (
     charts_view,
     track_view,
 )
-from TrailPredictor.api.jobs import JobManager
+from TrailPredictor.api.jobs import JobCreated, JobManager
 from TrailPredictor.loading import UnknownActivityError
 from TrailPredictor.plot.track_3d import ColorBy, MapTexture
 
@@ -26,18 +25,6 @@ DEFAULT_SEGMENT_WIDTH = 100  # m
 DEFAULT_DROP_THRESHOLD = 2.0  # m
 
 router = APIRouter(prefix="/api/activities", tags=["activities"])
-
-
-class JobCreated(BaseModel):
-    """Identifier of a submitted job.
-
-    Attributes
-    ----------
-    job_id : str
-        Identifier to follow at ``/api/jobs/{job_id}/events``.
-    """
-
-    job_id: str
 
 
 def _service(request: Request) -> ActivityService:

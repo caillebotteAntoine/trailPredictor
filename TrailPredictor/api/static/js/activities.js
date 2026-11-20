@@ -1,6 +1,7 @@
 // Alpine component of the activity page.
 
 import { fetchJson, watchJob } from "./api.js";
+import { PLOTLY_CONFIG, errorMessage as apiError, nextFrame } from "./ui.js";
 
 const CHARTS = [
   { name: "altitude", title: "Altitude" },
@@ -8,7 +9,6 @@ const CHARTS = [
   { name: "pace", title: "Allure par segment" },
   { name: "heart_rate_zones", title: "Zones cardiaques" },
 ];
-const PLOTLY_CONFIG = { responsive: true, displaylogo: false };
 const SECONDS_PER_HOUR = 3600;
 const SECONDS_PER_MINUTE = 60;
 
@@ -35,16 +35,6 @@ const METRIC_FORMATS = [
   { field: "average_pace_min_per_km", label: "Allure moyenne", format: formatPace },
   { field: "average_heart_rate_bpm", label: "FC moyenne", format: (v) => `${v.toFixed(0)} bpm` },
 ];
-
-function apiError(error) {
-  return error instanceof Error ? error.message : String(error);
-}
-
-// Resolve after the next layout: containers just shown by x-show then have
-// their real size (Plotly and deck.gl otherwise fall back to a default size).
-function nextFrame() {
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
-}
 
 document.addEventListener("alpine:init", () => {
   window.Alpine.data("activityPage", () => ({

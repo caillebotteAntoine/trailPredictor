@@ -13,6 +13,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from enum import StrEnum
 
+from pydantic import BaseModel
+
 from TrailPredictor.load_fit import ProgressCallback
 
 logger = logging.getLogger(__name__)
@@ -33,6 +35,18 @@ class JobStatus(StrEnum):
 
 
 FINISHED_STATUSES = frozenset({JobStatus.SUCCEEDED, JobStatus.FAILED})
+
+
+class JobCreated(BaseModel):
+    """Response of a route that starts a job.
+
+    Attributes
+    ----------
+    job_id : str
+        Identifier to follow at ``/api/jobs/{job_id}/events``.
+    """
+
+    job_id: str
 
 
 class UnknownJobError(KeyError):

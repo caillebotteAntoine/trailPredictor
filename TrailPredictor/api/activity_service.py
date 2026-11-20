@@ -11,6 +11,7 @@ import threading
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import asdict
+from functools import partial
 from typing import Any, Literal
 
 import pandas as pd
@@ -18,6 +19,7 @@ from pydantic import BaseModel
 
 from TrailPredictor.activities import RunningActivities
 from TrailPredictor.activity_metrics import ActivityMetrics, compute_activity_metrics
+from TrailPredictor.api.figures import ChartView, build_chart
 from TrailPredictor.load_fit import ProgressCallback
 from TrailPredictor.loading import (
     activity_file_name,
@@ -69,21 +71,6 @@ class ActivitySummary(BaseModel):
     name: str
     date: str | None
     distance_km: float | None
-
-
-class ChartView(BaseModel):
-    """Plotly figure of a chart, or the error that prevented it.
-
-    Attributes
-    ----------
-    figure : dict or None
-        Plotly figure JSON (``data`` and ``layout``).
-    error : str or None
-        Error message when the figure could not be built.
-    """
-
-    figure: dict[str, Any] | None = None
-    error: str | None = None
 
 
 class ChartsView(BaseModel):
@@ -201,16 +188,10 @@ def charts_view(plot: PlotActivities, x_axis: XAxis = "distance") -> ChartsView:
     ChartsView
         Metrics and charts of the activity.
     """
-    charts = {}
-    # loop over the few charts, not over the data
-    for name, build in CHARTS.items():
-        try:
-            figure = json.loads(build(plot, x_axis).to_json())
-            charts[name] = ChartView(figure=figure)
-        # UI boundary: a failing chart is reported, the others are still shown.
-        except Exception as error:  # pylint: disable=broad-exception-caught
-            logger.exception("Chart %s of %s failed", name, plot.name)
-            charts[name] = ChartView(error=str(error) or repr(error))
+    charts = {
+        name: build_chart(name, partial(build, plot, x_axis))
+        for name, build in CHARTS.items()
+    }
     return ChartsView(
         metrics=metrics_view(compute_activity_metrics(plot.data)), charts=charts
     )
