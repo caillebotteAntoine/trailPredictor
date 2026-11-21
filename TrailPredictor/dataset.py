@@ -49,7 +49,7 @@ EXCLUDED_COLUMNS = set(META_COLUMNS + TARGET_COLUMNS + PREDICTION_COLUMNS)
 ROW_KEY_COLUMNS = ["activity_id", "segment"]  # identify a segment
 
 
-def infer_segment_width(data: pd.DataFrame) -> float:
+def infer_segment_width(data: pd.DataFrame) -> int:
     """Infer the segment width from the cumulative distance.
 
     The width is the median distance step computed inside each activity, so
@@ -63,7 +63,7 @@ def infer_segment_width(data: pd.DataFrame) -> float:
 
     Returns
     -------
-    float
+    int
         Segment width in metres.
 
     Raises
@@ -71,10 +71,10 @@ def infer_segment_width(data: pd.DataFrame) -> float:
     ValueError
         If no finite, strictly positive width can be inferred.
     """
-    width = data.groupby("activity_id")["distance"].diff().median()
+    width = data["distance"].diff().median()
     if not np.isfinite(width) or width <= 0:
         raise ValueError("Cannot infer a positive segment width from 'distance'.")
-    return float(width)
+    return int(width)
 
 
 def dataset_name(min_distance: int, max_distance: int, segment_width: int) -> str:
@@ -207,7 +207,7 @@ class Dataset:  # pylint: disable=too-many-public-methods
         return self._target_name
 
     @property
-    def segment_width(self) -> float:
+    def segment_width(self) -> int:
         """Segment width in meters."""
         return self._segment_width
 
@@ -710,6 +710,7 @@ class Dataset:  # pylint: disable=too-many-public-methods
             pd.DataFrame,
             self._data.loc[self._data["activity_id"] == activity_id],
         )
+
         if activity_data.empty:
             raise ValueError(f"No data found for activity_id {activity_id}")
 

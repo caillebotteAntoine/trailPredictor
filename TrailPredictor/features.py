@@ -390,7 +390,4 @@ def build_features(
 
     x["heart_rate_zone"] = assign_heart_rate_zones(x["heart_rate"], heart_rate_zones)
 
-    if x["activity_id"].nunique() == 1:
-        x = x.drop(columns="activity_id")
-
     return x
